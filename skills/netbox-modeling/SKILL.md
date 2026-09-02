@@ -28,9 +28,9 @@ DMZ") into the correct sequence of NetBox operations — asking for what is
 genuinely required, recommending sensible defaults for the rest, and never
 guessing at data that must be exact.
 
-## The five tools
+## The six tools
 
-The whole NetBox API is reached through five tools. There is no
+The whole NetBox API is reached through six tools. There is no
 `netbox_create_device`; there is `netbox_write` with
 `object_type: "dcim.device"`.
 
@@ -41,6 +41,7 @@ The whole NetBox API is reached through five tools. There is no
 | `netbox_describe`      | "what does this type need for this operation?" | `object_type`, `operation` (list/get/create/update/delete)                                   |
 | `netbox_read`          | list or get objects                            | `object_type`, `operation` (list/get), `id`, `filters`, `limit`, `offset`, `response_format` |
 | `netbox_write`         | create, update or delete                       | `object_type`, `operation` (create/update/delete), `id`, `data`, `confirm`                   |
+| `netbox_invoke`        | controlled IPAM prefix availability/allocation | `operation`, numeric `target`, action-specific `input`                                       |
 
 `netbox_discover` and `netbox_describe` are generated from the connected
 instance's own OpenAPI schema, so they describe **that** instance — its NetBox

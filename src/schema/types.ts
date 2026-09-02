@@ -17,6 +17,47 @@ export type ObjectTypeKey = string;
 
 export type Operation = "list" | "get" | "create" | "update" | "delete";
 
+/** Schema-confirmed native detail actions available to the semantic action layer. */
+export type DetailActionName = "available-ips" | "available-prefixes";
+export type DetailActionMethod = "get" | "post";
+
+/** A JSON-schema-shaped value made safe to advertise as action metadata. */
+export interface DetailActionSchema {
+  type?: string | undefined;
+  format?: string | undefined;
+  description?: string | undefined;
+  nullable?: boolean | undefined;
+  enum?: unknown[] | undefined;
+  default?: unknown;
+  minimum?: number | undefined;
+  maximum?: number | undefined;
+  minLength?: number | undefined;
+  maxLength?: number | undefined;
+  properties?: Record<string, DetailActionSchema> | undefined;
+  required?: string[] | undefined;
+  items?: DetailActionSchema | undefined;
+  additionalProperties?: boolean | DetailActionSchema | undefined;
+  oneOf?: DetailActionSchema[] | undefined;
+  anyOf?: DetailActionSchema[] | undefined;
+  allOf?: DetailActionSchema[] | undefined;
+}
+
+/**
+ * The contract for one schema-confirmed native detail action.  It deliberately
+ * contains only request/query/response shapes, not an endpoint path, so the
+ * tool layer cannot turn it into arbitrary HTTP.
+ */
+export interface DetailActionContract {
+  /** Required integer `{id}` path parameter that the tool maps from `target`. */
+  path_id_schema?: DetailActionSchema | undefined;
+  query_schema: DetailActionSchema;
+  /** Whether the operation has no body, a JSON body, or only unsupported body media types. */
+  request_content: "none" | "json" | "non-json";
+  request_required: boolean;
+  request_schema?: DetailActionSchema | undefined;
+  response_schema?: DetailActionSchema | undefined;
+}
+
 export interface ObjectTypeSummary {
   /** e.g. `dcim.device` */
   object_type: ObjectTypeKey;
@@ -178,6 +219,29 @@ export interface SchemaProvider {
   resolve(objectType: ObjectTypeKey): Promise<ObjectTypeSummary | undefined>;
 
   describe(objectType: ObjectTypeKey, operation: Operation): Promise<DescribeResult>;
+
+  /**
+   * Whether this instance's OpenAPI document exposes the exact native detail
+   * action and method. Optional for third-party/test providers; callers must
+   * treat an absent capability as unsupported.
+   */
+  supportsDetailAction?(
+    this: void,
+    objectType: ObjectTypeKey,
+    action: DetailActionName,
+    method: DetailActionMethod,
+  ): Promise<boolean>;
+
+  /**
+   * Schema-derived request/query/response contract for a native detail action.
+   * An absent contract is unsupported; method/path presence alone is unsafe.
+   */
+  detailActionContract?(
+    this: void,
+    objectType: ObjectTypeKey,
+    action: DetailActionName,
+    method: DetailActionMethod,
+  ): Promise<DetailActionContract | undefined>;
 }
 
 /** Thrown when a caller names an object type that does not exist. */

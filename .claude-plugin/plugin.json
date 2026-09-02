@@ -2,7 +2,7 @@
   "name": "netbox-mcp",
   "displayName": "NetBox",
   "version": "0.2.0",
-  "description": "NetBox source of truth for your assistant: the five-tool netbox MCP server plus the netbox-modeling skill that drives it. Model sites, racks, devices, modules, cables and IPAM without guessing a field name.",
+  "description": "NetBox source of truth for your assistant: the netbox-modeling skill for the six-tool NetBox MCP server. Configure the server separately with the client-specific absolute launcher path documented in README.md and AGENTS.md.",
   "author": {
     "name": "Zenix Solutions",
     "url": "https://github.com/ZenixSolutions"
@@ -10,30 +10,5 @@
   "homepage": "https://github.com/ZenixSolutions/netbox-mcp-server#readme",
   "repository": "https://github.com/ZenixSolutions/netbox-mcp-server",
   "license": "MIT",
-  "keywords": ["netbox", "dcim", "ipam", "infrastructure", "mcp"],
-  "userConfig": {
-    "netbox_url": {
-      "type": "string",
-      "title": "NetBox URL",
-      "description": "Base URL of your NetBox instance, e.g. https://netbox.example.com — no /api suffix and no trailing path.",
-      "required": true
-    },
-    "netbox_token": {
-      "type": "string",
-      "title": "NetBox API token",
-      "description": "NetBox → your user menu → API Tokens → Add a token. Leave 'Write enabled' unchecked unless the assistant is meant to change infrastructure records.",
-      "sensitive": true,
-      "required": true
-    }
-  },
-  "mcpServers": {
-    "netbox": {
-      "command": "npx",
-      "args": ["-y", "@zenixsolutions/netbox-mcp@0.2.0"],
-      "env": {
-        "NETBOX_URL": "${user_config.netbox_url}",
-        "NETBOX_TOKEN": "${user_config.netbox_token}"
-      }
-    }
-  }
+  "keywords": ["netbox", "dcim", "ipam", "infrastructure", "mcp"]
 }

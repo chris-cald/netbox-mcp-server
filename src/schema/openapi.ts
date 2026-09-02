@@ -31,6 +31,8 @@ export interface JsonSchemaNode {
   additionalProperties?: JsonSchemaNode | boolean;
   maxLength?: number;
   minLength?: number;
+  maximum?: number;
+  minimum?: number;
 }
 
 export interface ParameterObject {

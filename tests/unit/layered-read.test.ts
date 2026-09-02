@@ -225,11 +225,48 @@ describe("list", () => {
     expect(result.structured?.count).toBeLessThan(400);
   });
 
+  it("omits an oversized first item with an explicit truncation marker", async () => {
+    http.list.mockResolvedValue({
+      count: 1,
+      next: null,
+      previous: null,
+      results: [{ id: 1, display: "oversized", comments: "x".repeat(30_000) }],
+    });
+    const result = await read(client, {
+      object_type: "dcim.device",
+      operation: "list",
+      limit: 1,
+    });
+    expect(result.text).toContain("first item is too large");
+    expect(result.structured).toMatchObject({
+      items: [],
+      count: 0,
+      items_truncated: true,
+      has_more: true,
+      next_offset: 0,
+    });
+    expect(
+      result.text.length + JSON.stringify(result.structured).length,
+    ).toBeLessThanOrEqual(CHARACTER_LIMIT);
+  });
+
   it("renders an empty result without pretending it failed", async () => {
     http.list.mockResolvedValue(page(0, 0));
     const result = await read(client, { object_type: "dcim.device", operation: "list" });
     expect(result.isError).toBe(false);
     expect(result.text).toContain("(no results)");
+  });
+
+  it("centrally bounds error text from an upstream adapter", async () => {
+    http.get.mockRejectedValue(new Error("x".repeat(30_000)));
+    const result = await read(client, {
+      object_type: "dcim.device",
+      operation: "get",
+      id: 1,
+    });
+    expect(result.isError).toBe(true);
+    expect(result.text.length).toBeLessThanOrEqual(CHARACTER_LIMIT);
+    expect(result.text).toContain("complete MCP result budget");
   });
 
   it("points at netbox_describe when NetBox rejects a filter VALUE", async () => {

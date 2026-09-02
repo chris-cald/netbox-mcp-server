@@ -2,7 +2,7 @@
 
 There are two halves, and they are useful separately but designed together:
 
-- **The MCP server** gives the assistant the five `netbox_*` tools. Without it there
+- **The MCP server** gives the assistant the six `netbox_*` tools. Without it there
   is nothing to call.
 - **The `netbox-modeling` skill** gives it the judgement — build order, required
   fields, deprecated models, the plan-then-write loop. Without it the assistant has
@@ -58,9 +58,9 @@ path and the client-specific credential location.
 ### Verify it loaded
 
 1. `/plugin` — `netbox-mcp` is listed and enabled.
-2. `/mcp` — a server named `netbox` is connected and shows **5 tools**:
+2. `/mcp` — a server named `netbox` is connected and shows **6 tools**:
    `netbox_global_search`, `netbox_discover`, `netbox_describe`, `netbox_read`,
-   `netbox_write`.
+   `netbox_write`, `netbox_invoke`.
 3. Ask: _"Using the netbox tools, list the first 5 sites."_
 4. The skill: ask _"rack a new switch in DC1"_ and watch for the assistant proposing a
    plan before writing. That behaviour is the skill; without it you get an immediate
@@ -166,7 +166,7 @@ ln -s "$PWD/skills/netbox-modeling" ~/.agents/skills/netbox-modeling
 ### Verify it loaded
 
 1. Restart Codex CLI.
-2. Verify its MCP-server listing shows `netbox` connected with 5 tools.
+2. Verify its MCP-server listing shows `netbox` connected with 6 tools.
 3. Ask: _"Using the netbox tools, list the first 5 sites."_
 4. Skill: `ls ~/.agents/skills/netbox-modeling/SKILL.md` exists, and the assistant plans
    before writing.
@@ -215,7 +215,7 @@ unzip dist/skills/netbox-modeling.skill -d ~/.grok/skills/
 ### Verify it loaded
 
 1. Restart Grok Build.
-2. `/mcp` lists `netbox` with 5 tools.
+2. `/mcp` lists `netbox` with 6 tools.
 3. Ask: _"Using the netbox tools, list the first 5 sites."_
 
 ---
@@ -257,7 +257,7 @@ And to prove the binary runs at all, with no credentials and no network:
 
 ```sh
 npx -y @zenixsolutions/netbox-mcp --list-tools
-# -> the five tool names on stdout, "5 tools registered." on stderr
+# -> the six tool names on stdout, "6 tools registered." on stderr
 ```
 
 ---

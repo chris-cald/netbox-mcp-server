@@ -37,7 +37,7 @@ export const SERVER_VERSION: string = (() => {
  * configuration at all — `--list-tools`, and any client that calls
  * `tools/list` before the user has supplied credentials.
  *
- * This is safe only because the five tools are registered statically: their
+ * This is safe only because the six tools are registered statically: their
  * names, descriptions and input schemas do not depend on the instance. The
  * schema is consulted when a tool is *called*, never when it is listed. The
  * surface suite pins that by listing tools through a provider that throws on
@@ -93,7 +93,7 @@ function assertInjectedApi(dependency: InjectedNetBoxApi): void {
   const api = dependency.api;
   if (
     !api ||
-    ["list", "get", "create", "update", "del"].some(
+    ["list", "get", "create", "update", "del", "prefixDetailAction"].some(
       (method) => typeof api[method as keyof NetBoxApi] !== "function",
     )
   ) {

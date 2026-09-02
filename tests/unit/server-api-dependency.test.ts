@@ -58,6 +58,7 @@ function api() {
       create: vi.fn(),
       update: vi.fn(),
       del: vi.fn(),
+      prefixDetailAction: vi.fn(),
     } satisfies NetBoxApi,
     list,
   };
@@ -127,7 +128,7 @@ describe("server API dependency", () => {
 
     const tools = await connection.client.listTools();
 
-    expect(tools.tools).toHaveLength(5);
+    expect(tools.tools).toHaveLength(6);
     expect(injected.list).not.toHaveBeenCalled();
   });
 
@@ -139,6 +140,7 @@ describe("server API dependency", () => {
       create: vi.fn(),
       update: vi.fn(),
       del: vi.fn(),
+      prefixDetailAction: vi.fn(),
     };
     const server = buildServer(
       { NETBOX_URL: "https://isolated.example", NETBOX_TOKEN: token },

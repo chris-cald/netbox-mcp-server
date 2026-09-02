@@ -52,9 +52,9 @@ Facts you may need:
 | Optional env vars   | `NETBOX_INSECURE` — **and nothing else**                                |
 | Tools registered    | **6**, always — see below                                               |
 
-### The five tools
+### The six tools
 
-The server registers exactly five tools, on every install, regardless of configuration:
+The server registers exactly six tools, on every install, regardless of configuration:
 
 | Tool                   | Layer | Does                                                                                                                       |
 | ---------------------- | ----- | -------------------------------------------------------------------------------------------------------------------------- |
@@ -63,6 +63,7 @@ The server registers exactly five tools, on every install, regardless of configu
 | `netbox_describe`      | 2     | Explains one object type: required fields, optional fields, read-only fields, accepted filters, and what must exist first. |
 | `netbox_read`          | 3     | `list` (filtered, paginated) or `get` (one object by id). Never modifies anything.                                         |
 | `netbox_write`         | 3     | `create`, `update` or `delete`. Changes NetBox records.                                                                    |
+| `netbox_invoke`        | 3     | Runs schema-confirmed, controlled IPAM prefix availability reads and allocations.                                          |
 
 **The object types those tools address are not fixed.** They are derived at runtime from
 the connected instance's own `/api/schema/` document, so which types exist depends on
@@ -378,7 +379,7 @@ Write `npx -y @zenixsolutions/netbox-mcp` where the table says `netbox-mcp`, or
 | `netbox-mcp --help`       | Prints usage and every environment variable the server reads. Reads no configuration.     | 0                               |
 | `netbox-mcp --version`    | Prints the version. Verified: `0.2.0`.                                                    | 0                               |
 | `netbox-mcp --check`      | Validates configuration; names the first missing or invalid variable. Contacts nothing.   | **0** usable, **78** not usable |
-| `netbox-mcp --list-tools` | Prints the 5 tool names to stdout, `5 tools registered.` to stderr. Needs no credentials. | 0                               |
+| `netbox-mcp --list-tools` | Prints the 6 tool names to stdout, `6 tools registered.` to stderr. Needs no credentials. | 0                               |
 
 Any other argument, or no argument at all, starts the server on stdio. There is no
 `--verbose`, no `--config`, and no `--port`; do not pass flags that are not in this table.
@@ -501,12 +502,13 @@ netbox_discover
 netbox_describe
 netbox_read
 netbox_write
+netbox_invoke
 ```
 
-on stdout, plus `5 tools registered.` on stderr, exit 0.
+on stdout, plus `6 tools registered.` on stderr, exit 0.
 
 **The count is always 6.** It does not vary with the environment, the NetBox version, or
-the plugins installed — the five tools are registered statically, and the instance schema
+the plugins installed — the six tools are registered statically, and the instance schema
 is only consulted when a tool is _called_. If you ever see a number other than 6, you are
 not running `0.2.0`.
 
@@ -724,10 +726,10 @@ process on the machine.
 npx -y @zenixsolutions/netbox-mcp --list-tools
 ```
 
-**Expect exactly the six names from section 5.3, and `5 tools registered.` on stderr.**
+**Expect exactly the six names from section 5.3, and `6 tools registered.` on stderr.**
 From a clone, run `node dist/index.js --list-tools` in the repository directory instead.
 
-- **A count other than 5:** you are running a different version than this file documents.
+- **A count other than 6:** you are running a different version than this file documents.
   Check `--version` before going further.
 - **An error instead of a list:** on the `npx` path, re-read section 4A — this is a
   registry or network problem, not a configuration one. On the clone path,
@@ -793,10 +795,10 @@ need to live anywhere else.
 
 ---
 
-## 8. Using the five tools correctly
+## 8. Using the six tools correctly
 
 This section is for the assistant that will _use_ the server after you install it, and
-for you if you are verifying it in 7.4. The five tools are layered; calling them out of
+for you if you are verifying it in 7.4. The six tools are layered; calling them out of
 order is the main way this server gets used badly.
 
 ### 8.1 The shortcut: when the user named a _thing_
@@ -988,7 +990,7 @@ Report back to the user:
 
 - which install path you used (`npx`, pinned or unpinned, or a clone and its path);
 - which config file you edited, and that you deleted the backup after validating it;
-- the tool count you measured in section 7.1 — it should be 5;
+- the tool count you measured in section 7.1 — it should be 6;
 - **whether the token they created can write**, and how you know. If you did not test a
   write, say you did not test a write. Never describe an install as read-only on the
   strength of a config value; nothing in the config makes it so.

@@ -10,6 +10,10 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 
+import {
+  applicablePrefixActions,
+  boundedSemanticActionMetadata,
+} from "../../actions/ipam-prefix.js";
 import { handleApiError } from "../../errors.js";
 import type { SchemaProvider } from "../../schema/types.js";
 import {
@@ -72,10 +76,20 @@ export function registerDescribe(server: McpServer, schema: SchemaProvider): voi
         const summary = await resolveType(schema, args.object_type);
         requireOperation(summary, args.operation);
         const described = await schema.describe(summary.object_type, args.operation);
-        return textResult(
-          clampText(renderDescribe(summary, described)),
-          describePayload(summary, described),
+        const semanticActions = await applicablePrefixActions(
+          schema,
+          summary.object_type,
         );
+        const actionMetadata = boundedSemanticActionMetadata(semanticActions);
+        const actionText =
+          semanticActions.length > 0
+            ? `\n\n## Controlled semantic actions\nUse netbox_invoke only with these schema-confirmed actions:\n${semanticActions.map((action) => `- \`${action.name}\` (${action.classification.access}, non-destructive) — ${action.description}`).join("\n")}`
+            : "";
+        return textResult(clampText(renderDescribe(summary, described) + actionText), {
+          ...describePayload(summary, described),
+          semantic_actions: actionMetadata.actions,
+          semantic_actions_metadata_truncated: actionMetadata.truncated,
+        });
       } catch (error) {
         return errorResult(toErrorText(error, handleApiError));
       }
