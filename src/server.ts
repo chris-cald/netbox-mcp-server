@@ -13,7 +13,8 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 
-import { loadConfig } from "./config.js";
+import { createNetBoxClient, type NetBoxApi } from "./client.js";
+import { loadConfig, type NetBoxConfig } from "./config.js";
 import { createSchemaProviderForConfig } from "./schema/index.js";
 import type { SchemaProvider } from "./schema/types.js";
 import { registerLayeredTools } from "./tools/layered/index.js";
@@ -56,6 +57,8 @@ function unconfiguredProvider(reason: string): SchemaProvider {
 export interface BuildServerOptions {
   /** Override the schema provider. Tests use this; nothing else should. */
   schema?: SchemaProvider | undefined;
+  /** Server-scoped API dependency. Tests and hosted transports may inject it. */
+  api?: NetBoxApi | undefined;
 }
 
 /**
@@ -71,10 +74,16 @@ export function buildServer(
 ): McpServer {
   const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION });
 
+  let config: NetBoxConfig | undefined;
+  const loadServerConfig = (): NetBoxConfig => {
+    if (!config) config = loadConfig(env);
+    return config;
+  };
+
   let schema = options.schema;
   if (!schema) {
     try {
-      schema = createSchemaProviderForConfig(loadConfig(env));
+      schema = createSchemaProviderForConfig(loadServerConfig());
     } catch (err) {
       schema = unconfiguredProvider(
         `${err instanceof Error ? err.message : String(err)} ` +
@@ -83,7 +92,15 @@ export function buildServer(
     }
   }
 
-  registerLayeredTools(server, schema);
+  // Construct the HTTP client only on the first execution call. Unlike the
+  // legacy `getClient` adapter, this cache belongs to this server instance.
+  let api = options.api;
+  const getServerApi = (): NetBoxApi => {
+    if (!api) api = createNetBoxClient(loadServerConfig());
+    return api;
+  };
+
+  registerLayeredTools(server, schema, getServerApi);
   return server;
 }
 

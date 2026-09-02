@@ -15,7 +15,11 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 
-import { getClient, type PaginatedResponse } from "../../client.js";
+import {
+  getClient,
+  type NetBoxApiProvider,
+  type PaginatedResponse,
+} from "../../client.js";
 import { displayRef, ResponseFormat, toDisplayString } from "../../formatting.js";
 import { ResponseFormatField } from "../../schemas/common.js";
 import { clampText, errorResult, textResult, toErrorText } from "./shared.js";
@@ -87,7 +91,10 @@ interface SectionResult {
   error?: string;
 }
 
-export function registerLayeredSearch(server: McpServer): void {
+export function registerLayeredSearch(
+  server: McpServer,
+  api: NetBoxApiProvider = getClient,
+): void {
   server.registerTool(
     "netbox_global_search",
     {
@@ -103,7 +110,7 @@ export function registerLayeredSearch(server: McpServer): void {
     },
     async (args): Promise<CallToolResult> => {
       try {
-        const client = getClient();
+        const client = api();
         const selected: readonly string[] | undefined = args.resources;
         const targets = selected
           ? SEARCH_TARGETS.filter((t) => selected.includes(t.label))

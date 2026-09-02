@@ -18,6 +18,7 @@
 
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 
+import { getClient, type NetBoxApiProvider } from "../../client.js";
 import type { SchemaProvider } from "../../schema/types.js";
 import { registerDescribe } from "./describe.js";
 import { registerDiscover } from "./discover.js";
@@ -25,12 +26,21 @@ import { registerRead } from "./read.js";
 import { registerLayeredSearch } from "./search.js";
 import { registerWrite } from "./write.js";
 
-export function registerLayeredTools(server: McpServer, schema: SchemaProvider): void {
-  registerLayeredSearch(server);
+/**
+ * `api` is resolved only when an execution tool runs. The default preserves
+ * the legacy singleton adapter for direct registrations, while `buildServer`
+ * supplies a server-scoped provider for isolated transports and credentials.
+ */
+export function registerLayeredTools(
+  server: McpServer,
+  schema: SchemaProvider,
+  api: NetBoxApiProvider = getClient,
+): void {
+  registerLayeredSearch(server, api);
   registerDiscover(server, schema);
   registerDescribe(server, schema);
-  registerRead(server, schema);
-  registerWrite(server, schema);
+  registerRead(server, schema, api);
+  registerWrite(server, schema, api);
 }
 
 export {

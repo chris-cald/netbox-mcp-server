@@ -19,7 +19,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 
-import { getClient } from "../../client.js";
+import { getClient, type NetBoxApiProvider } from "../../client.js";
 import { renderObjectMarkdown, toDisplayString } from "../../formatting.js";
 import type {
   DescribeResult,
@@ -86,7 +86,11 @@ Rules that are enforced, not advisory:
   - 'update' is a partial write. Only the fields present in 'data' change; everything else is left alone.
   - 'delete' requires 'confirm' to equal the object's current 'display' value. Read the object first (netbox_read with operation='get'), copy the 'display' value, and pass it. A mismatch refuses the delete and shows both values. Deletes cascade in NetBox — removing a site can remove its racks, devices and prefixes — and cannot be undone, so confirm with the user before calling.`;
 
-export function registerWrite(server: McpServer, schema: SchemaProvider): void {
+export function registerWrite(
+  server: McpServer,
+  schema: SchemaProvider,
+  api: NetBoxApiProvider = getClient,
+): void {
   server.registerTool(
     "netbox_write",
     {
@@ -106,9 +110,9 @@ export function registerWrite(server: McpServer, schema: SchemaProvider): void {
         requireOperation(summary, args.operation);
 
         if (args.operation === "delete") {
-          return await runDelete(summary, args.id, args.confirm);
+          return await runDelete(summary, args.id, args.confirm, api);
         }
-        return await runWrite(schema, summary, args.operation, args.id, args.data);
+        return await runWrite(schema, summary, args.operation, args.id, args.data, api);
       } catch (error) {
         return errorResult(toErrorText(error));
       }
@@ -122,6 +126,7 @@ async function runWrite(
   operation: "create" | "update",
   id: number | undefined,
   data: Record<string, unknown> | undefined,
+  api: NetBoxApiProvider,
 ): Promise<CallToolResult> {
   if (operation === "update" && id === undefined) {
     return errorResult(
@@ -154,7 +159,7 @@ async function runWrite(
     );
   }
 
-  const client = getClient();
+  const client = api();
   const result =
     operation === "create"
       ? await client.create<Record<string, unknown>>(summary.endpoint, data)
@@ -186,6 +191,7 @@ async function runDelete(
   summary: ObjectTypeSummary,
   id: number | undefined,
   confirm: string | undefined,
+  api: NetBoxApiProvider,
 ): Promise<CallToolResult> {
   if (id === undefined) {
     return errorResult(
@@ -193,7 +199,7 @@ async function runDelete(
     );
   }
 
-  const client = getClient();
+  const client = api();
   const object = await client.get<Record<string, unknown>>(summary.endpoint, id);
   const display = toDisplayString(
     object.display ?? object.name ?? object.slug ?? object.address ?? object.prefix ?? "",

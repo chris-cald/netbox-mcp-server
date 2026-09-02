@@ -12,7 +12,11 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 
-import { getClient, type PaginatedResponse } from "../../client.js";
+import {
+  getClient,
+  type NetBoxApiProvider,
+  type PaginatedResponse,
+} from "../../client.js";
 import { DEFAULT_LIMIT, MAX_LIMIT } from "../../constants.js";
 import {
   buildListPayload,
@@ -142,7 +146,11 @@ Returns Markdown by default, or JSON shaped { total, count, offset, limit, items
 
 A filter value is usually a slug or an id, not a display name: filter devices by site='dc1' (slug) or site_id=3, not site='DC 1'. An unknown filter name is rejected here with the valid ones listed, because NetBox itself would ignore it and return everything.`;
 
-export function registerRead(server: McpServer, schema: SchemaProvider): void {
+export function registerRead(
+  server: McpServer,
+  schema: SchemaProvider,
+  api: NetBoxApiProvider = getClient,
+): void {
   server.registerTool(
     "netbox_read",
     {
@@ -161,8 +169,8 @@ export function registerRead(server: McpServer, schema: SchemaProvider): void {
         const summary = await resolveType(schema, args.object_type);
         requireOperation(summary, args.operation);
         return args.operation === "get"
-          ? await runGet(summary, args)
-          : await runList(summary, args, schema);
+          ? await runGet(summary, args, api)
+          : await runList(summary, args, schema, api);
       } catch (error) {
         return errorResult(toErrorText(error));
       }
@@ -183,6 +191,7 @@ interface ReadArgs {
 async function runGet(
   summary: ObjectTypeSummary,
   args: ReadArgs,
+  api: NetBoxApiProvider,
 ): Promise<CallToolResult> {
   if (args.id === undefined) {
     return errorResult(
@@ -190,10 +199,7 @@ async function runGet(
         `or call netbox_read with operation='list' (optionally with filters) to find it.`,
     );
   }
-  const object = await getClient().get<Record<string, unknown>>(
-    summary.endpoint,
-    args.id,
-  );
+  const object = await api().get<Record<string, unknown>>(summary.endpoint, args.id);
   if (args.response_format === ResponseFormat.JSON) {
     return textResult(clampText(JSON.stringify(object, null, 2)), {
       object_type: summary.object_type,
@@ -309,6 +315,7 @@ async function runList(
   summary: ObjectTypeSummary,
   args: ReadArgs,
   schema: SchemaProvider,
+  api: NetBoxApiProvider,
 ): Promise<CallToolResult> {
   const filters = args.filters ?? {};
   const names = Object.keys(filters);
@@ -331,7 +338,7 @@ async function runList(
 
   let response: PaginatedResponse<Record<string, unknown>>;
   try {
-    response = await getClient().list<Record<string, unknown>>(summary.endpoint, {
+    response = await api().list<Record<string, unknown>>(summary.endpoint, {
       ...normaliseBrief(filters),
       limit: args.limit,
       offset: args.offset,
