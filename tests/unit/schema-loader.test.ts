@@ -4,13 +4,16 @@
  */
 
 import { mkdtemp, readdir, rm } from "node:fs/promises";
+import http from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { NetBoxConfig } from "../../src/config.js";
+import { createCredentialProvider } from "../../src/credentials.js";
 import {
+  createHttpGet,
   createSchemaLoader,
   defaultCacheDir,
   SchemaUnavailableError,
@@ -21,7 +24,7 @@ import {
 const config: NetBoxConfig = {
   baseUrl: "https://netbox.example.com",
   apiUrl: "https://netbox.example.com/api",
-  token: "s3cr3t-token",
+  credentials: createCredentialProvider({ inlineToken: "s3cr3t-token" }),
   insecure: false,
 };
 
@@ -68,6 +71,58 @@ afterEach(async () => {
   await rm(cacheDir, { recursive: true, force: true });
 });
 
+describe("transport redirects", () => {
+  it.each([false, true])(
+    "rejects a cross-origin redirect without forwarding Authorization (insecure=%s)",
+    async (insecure) => {
+      let redirectedAuthorization: string | undefined;
+      const destination = http.createServer((request, response) => {
+        redirectedAuthorization = request.headers.authorization;
+        response.writeHead(200).end("unexpected");
+      });
+      await new Promise<void>((resolve) => destination.listen(0, "127.0.0.1", resolve));
+      const destinationAddress = destination.address();
+      if (!destinationAddress || typeof destinationAddress === "string") {
+        throw new Error("test server did not expose a TCP address");
+      }
+
+      const source = http.createServer((_request, response) => {
+        response
+          .writeHead(302, {
+            Location: `http://127.0.0.1:${destinationAddress.port}/schema`,
+          })
+          .end();
+      });
+      await new Promise<void>((resolve) => source.listen(0, "127.0.0.1", resolve));
+      const sourceAddress = source.address();
+      if (!sourceAddress || typeof sourceAddress === "string") {
+        throw new Error("test server did not expose a TCP address");
+      }
+
+      try {
+        const httpGet = createHttpGet({ ...config, insecure });
+        await expect(
+          httpGet(
+            `http://127.0.0.1:${sourceAddress.port}/schema`,
+            { Authorization: "Token redirect-test-secret" },
+            1_000,
+          ),
+        ).rejects.toThrow(/cross-origin redirect/i);
+        expect(redirectedAuthorization).toBeUndefined();
+      } finally {
+        await Promise.all([
+          new Promise<void>((resolve, reject) =>
+            source.close((error) => (error ? reject(error) : resolve())),
+          ),
+          new Promise<void>((resolve, reject) =>
+            destination.close((error) => (error ? reject(error) : resolve())),
+          ),
+        ]);
+      }
+    },
+  );
+});
+
 describe("fetching", () => {
   it("requests /api/schema/?format=json with the token and the vendor Accept type", async () => {
     const { httpGet, calls } = makeHttpGet({
@@ -96,6 +151,34 @@ describe("fetching", () => {
    * this end cannot fix — but dropping the request header would turn a
    * server-side misconfiguration into a permanent one, so it is pinned here.
    */
+  it("gets credentials from the provider for both status and schema requests", async () => {
+    let tokenNumber = 0;
+    const rotatingConfig: NetBoxConfig = {
+      ...config,
+      credentials: {
+        getToken: () => Promise.resolve(`rotated-token-${++tokenNumber}`),
+      },
+    };
+    const { httpGet, calls } = makeHttpGet({
+      "/status/": ok({ "netbox-version": "4.6.7" }),
+      "/schema/": ok(document),
+    });
+
+    await createSchemaLoader({
+      config: rotatingConfig,
+      httpGet,
+      cacheDir,
+      warn: () => {},
+    }).load();
+
+    expect(
+      calls.find((call) => call.url.includes("/status/"))?.headers["Authorization"],
+    ).toBe("Token rotated-token-1");
+    expect(
+      calls.find((call) => call.url.includes("/schema/"))?.headers["Authorization"],
+    ).toBe("Token rotated-token-2");
+  });
+
   it("asks for a compressed schema: 12 MB is not a reasonable first tool call", async () => {
     const { httpGet, calls } = makeHttpGet({
       "/status/": ok({ "netbox-version": "4.6.7" }),
@@ -316,6 +399,45 @@ describe("failure is honest", () => {
     await expect(
       createSchemaLoader({ config, httpGet, cacheDir, warn: () => {} }).load(),
     ).rejects.toThrow(/was not JSON/);
+  });
+
+  it("redacts a token-file value from a non-JSON schema response", async () => {
+    const token = "file-token-that-must-not-leak";
+    const tokenFileConfig: NetBoxConfig = {
+      ...config,
+      credentials: createCredentialProvider({
+        tokenFile: "/run/secrets/netbox-token",
+        fileSystem: {
+          stat: () => Promise.resolve({ isFile: () => true }),
+          readFile: () => Promise.resolve(token),
+        },
+      }),
+    };
+    const { httpGet } = makeHttpGet({
+      "/status/": ok({ "netbox-version": "4.6.7" }),
+      "/schema/": {
+        status: 200,
+        statusText: "OK",
+        body:
+          `gateway rejected Authorization: Bearer ${token}; ` +
+          `it also reflected ${token} without a prefix`,
+      },
+    });
+
+    const error = await createSchemaLoader({
+      config: tokenFileConfig,
+      httpGet,
+      cacheDir,
+      warn: () => {},
+    })
+      .load()
+      .then(
+        () => undefined,
+        (reason: unknown) => String(reason),
+      );
+
+    expect(error).not.toContain(token);
+    expect(error).toContain("[redacted]");
   });
 
   it("rejects JSON that is not an OpenAPI document, without quoting it", async () => {

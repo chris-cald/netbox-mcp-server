@@ -21,6 +21,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { getClient, type NetBoxApiProvider } from "../../client.js";
 import type { SchemaProvider } from "../../schema/types.js";
 import { registerDescribe } from "./describe.js";
+import { requireApiErrorSanitizer, type ApiErrorSanitizer } from "./shared.js";
 import { registerDiscover } from "./discover.js";
 import { registerRead } from "./read.js";
 import { registerLayeredSearch } from "./search.js";
@@ -35,12 +36,14 @@ export function registerLayeredTools(
   server: McpServer,
   schema: SchemaProvider,
   api: NetBoxApiProvider = getClient,
+  sanitizeApiError?: ApiErrorSanitizer,
 ): void {
-  registerLayeredSearch(server, api);
+  const errorSanitizer = requireApiErrorSanitizer(api, sanitizeApiError);
+  registerLayeredSearch(server, api, errorSanitizer);
   registerDiscover(server, schema);
   registerDescribe(server, schema);
-  registerRead(server, schema, api);
-  registerWrite(server, schema, api);
+  registerRead(server, schema, api, errorSanitizer);
+  registerWrite(server, schema, api, errorSanitizer);
 }
 
 export {

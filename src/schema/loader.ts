@@ -28,6 +28,7 @@ import { join } from "node:path";
 import zlib from "node:zlib";
 
 import type { NetBoxConfig } from "../config.js";
+import { createCredentialRedactor, type SecretRedactor } from "../errors.js";
 import { isOpenApiDocument, type OpenApiDocument } from "./openapi.js";
 
 const SCHEMA_PATH = "/schema/?format=json";
@@ -79,13 +80,13 @@ export class SchemaUnavailableError extends Error {
   constructor(
     readonly url: string,
     readonly reason: string,
-    options?: { cause?: unknown },
   ) {
+    // Do not retain an upstream cause: error inspectors can log causes, whose
+    // text is outside this process's control and may reflect Authorization.
     super(
       `Could not load the NetBox OpenAPI schema from ${url}: ${reason} ` +
         `Object-type discovery and field descriptions are unavailable until this is fixed; ` +
         `no substitute schema is used.`,
-      options,
     );
     this.name = "SchemaUnavailableError";
   }
@@ -96,12 +97,21 @@ interface StatusInfo {
   plugins: string[];
 }
 
-function authHeaders(config: NetBoxConfig): Record<string, string> {
+interface AuthorizedRequest {
+  headers: Record<string, string>;
+  redact: SecretRedactor;
+}
+
+async function authorizedRequest(config: NetBoxConfig): Promise<AuthorizedRequest> {
+  const token = await config.credentials.getToken();
   return {
-    Authorization: `Token ${config.token}`,
-    Accept: "application/vnd.oai.openapi+json, application/json",
-    "Accept-Encoding": "gzip, deflate",
-    "User-Agent": "netbox-mcp",
+    headers: {
+      Authorization: `Token ${token}`,
+      Accept: "application/vnd.oai.openapi+json, application/json",
+      "Accept-Encoding": "gzip, deflate",
+      "User-Agent": "netbox-mcp",
+    },
+    redact: createCredentialRedactor(token),
   };
 }
 
@@ -109,12 +119,17 @@ function sha256(value: string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function oneLineSnippet(body: string): string {
-  return body.replace(/\s+/g, " ").trim().slice(0, SNIPPET_CHARS);
+function oneLineSnippet(body: string, redact: SecretRedactor): string {
+  return redact(body).replace(/\s+/g, " ").trim().slice(0, SNIPPET_CHARS);
 }
 
-function statusReason(status: number, statusText: string): string {
-  const label = `HTTP ${status}${statusText ? ` ${statusText}` : ""}.`;
+function statusReason(
+  status: number,
+  statusText: string,
+  redact: SecretRedactor,
+): string {
+  const safeStatusText = redact(statusText);
+  const label = `HTTP ${status}${safeStatusText ? ` ${safeStatusText}` : ""}.`;
   if (status === 401 || status === 403) {
     return `${label} NETBOX_TOKEN was rejected, or the instance requires authentication for /api/schema/.`;
   }
@@ -136,17 +151,52 @@ export function createHttpGet(config: NetBoxConfig): HttpGet {
 const insecureHttpGet: HttpGet = (url, headers, timeoutMs) =>
   insecureGet(url, headers, timeoutMs, MAX_REDIRECTS);
 
-const fetchHttpGet: HttpGet = async (url, headers, timeoutMs) => {
-  const response = await fetch(url, {
+const fetchHttpGet: HttpGet = (url, headers, timeoutMs) =>
+  fetchGet(url, headers, timeoutMs, MAX_REDIRECTS);
+
+/** Reject redirects that would send the credential to another origin. */
+function redirectTarget(location: string, current: URL): URL {
+  const target = new URL(location, current);
+  if (target.origin !== current.origin) {
+    throw new Error("Refusing cross-origin redirect while fetching NetBox.");
+  }
+  return target;
+}
+
+async function fetchGet(
+  url: string,
+  headers: Record<string, string>,
+  timeoutMs: number,
+  redirectsLeft: number,
+): Promise<HttpResponse> {
+  const current = new URL(url);
+  const response = await fetch(current, {
     headers,
-    redirect: "follow",
+    // Handle redirects ourselves so the Authorization policy is identical for
+    // the normal and NETBOX_INSECURE transports.
+    redirect: "manual",
     signal: AbortSignal.timeout(timeoutMs),
   });
+  const location = response.headers.get("location");
+  if (
+    response.status >= 300 &&
+    response.status < 400 &&
+    location !== null &&
+    redirectsLeft > 0
+  ) {
+    await response.body?.cancel();
+    return fetchGet(
+      redirectTarget(location, current).toString(),
+      headers,
+      timeoutMs,
+      redirectsLeft - 1,
+    );
+  }
   // Deliberately no content-type check: drf-spectacular serves
   // `application/vnd.oai.openapi+json`.
   const body = await response.text();
   return { status: response.status, statusText: response.statusText, body };
-};
+}
 
 /**
  * TLS-permissive transport for NETBOX_INSECURE=1. Native fetch has no
@@ -167,12 +217,17 @@ function insecureGet(
       const location = response.headers.location;
       if (status >= 300 && status < 400 && location !== undefined && redirectsLeft > 0) {
         response.resume();
-        insecureGet(
-          new URL(location, target).toString(),
-          headers,
-          timeoutMs,
-          redirectsLeft - 1,
-        ).then(resolve, reject);
+        let redirect: URL;
+        try {
+          redirect = redirectTarget(location, target);
+        } catch (error) {
+          reject(error instanceof Error ? error : new Error(String(error)));
+          return;
+        }
+        insecureGet(redirect.toString(), headers, timeoutMs, redirectsLeft - 1).then(
+          resolve,
+          reject,
+        );
         return;
       }
       const encoding = (response.headers["content-encoding"] ?? "").toLowerCase();
@@ -260,8 +315,11 @@ export function createSchemaLoader(options: SchemaLoaderOptions): SchemaLoader {
 
   async function readStatus(): Promise<StatusInfo> {
     const url = `${config.apiUrl}${STATUS_PATH}`;
+    let redact: SecretRedactor = (text) => text;
     try {
-      const response = await httpGet(url, authHeaders(config), DEFAULT_STATUS_TIMEOUT_MS);
+      const request = await authorizedRequest(config);
+      redact = request.redact;
+      const response = await httpGet(url, request.headers, DEFAULT_STATUS_TIMEOUT_MS);
       if (response.status >= 400) {
         warn(`/api/status/ returned HTTP ${response.status}; caching by document hash.`);
         return { version: undefined, plugins: [] };
@@ -284,7 +342,7 @@ export function createSchemaLoader(options: SchemaLoaderOptions): SchemaLoader {
       return { version, plugins };
     } catch (error) {
       warn(
-        `/api/status/ was unreadable (${describeError(error)}); caching by document hash.`,
+        `/api/status/ was unreadable (${redact(describeError(error))}); caching by document hash.`,
       );
       return { version: undefined, plugins: [] };
     }
@@ -329,28 +387,28 @@ export function createSchemaLoader(options: SchemaLoaderOptions): SchemaLoader {
 
   async function fetchDocument(status: StatusInfo): Promise<LoadedSchema> {
     let response: HttpResponse;
+    let redact: SecretRedactor = (text) => text;
     try {
-      response = await httpGet(schemaUrl, authHeaders(config), timeoutMs);
+      const request = await authorizedRequest(config);
+      redact = request.redact;
+      response = await httpGet(schemaUrl, request.headers, timeoutMs);
     } catch (error) {
-      throw new SchemaUnavailableError(schemaUrl, `${describeError(error)}.`, {
-        cause: error,
-      });
+      throw new SchemaUnavailableError(schemaUrl, `${redact(describeError(error))}.`);
     }
     if (response.status >= 400) {
       throw new SchemaUnavailableError(
         schemaUrl,
-        statusReason(response.status, response.statusText),
+        statusReason(response.status, response.statusText, redact),
       );
     }
 
     let parsed: unknown;
     try {
       parsed = JSON.parse(response.body) as unknown;
-    } catch (error) {
+    } catch {
       throw new SchemaUnavailableError(
         schemaUrl,
-        `the response was not JSON (starts with "${oneLineSnippet(response.body)}").`,
-        { cause: error },
+        `the response was not JSON (starts with "${oneLineSnippet(response.body, redact)}").`,
       );
     }
     if (!isOpenApiDocument(parsed)) {

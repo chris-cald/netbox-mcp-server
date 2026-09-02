@@ -22,7 +22,14 @@ import {
 } from "../../client.js";
 import { displayRef, ResponseFormat, toDisplayString } from "../../formatting.js";
 import { ResponseFormatField } from "../../schemas/common.js";
-import { clampText, errorResult, textResult, toErrorText } from "./shared.js";
+import type { ApiErrorSanitizer } from "./shared.js";
+import {
+  clampText,
+  errorResult,
+  requireApiErrorSanitizer,
+  textResult,
+  toErrorText,
+} from "./shared.js";
 
 const SEARCH_TARGETS: { endpoint: string; label: string }[] = [
   { endpoint: "dcim/sites", label: "sites" },
@@ -94,7 +101,9 @@ interface SectionResult {
 export function registerLayeredSearch(
   server: McpServer,
   api: NetBoxApiProvider = getClient,
+  sanitizeApiError?: ApiErrorSanitizer,
 ): void {
+  const errorSanitizer = requireApiErrorSanitizer(api, sanitizeApiError);
   server.registerTool(
     "netbox_global_search",
     {
@@ -138,7 +147,7 @@ export function registerLayeredSearch(
                 label: targets[i]?.label ?? "unknown",
                 total: 0,
                 items: [],
-                error: toErrorText(r.reason),
+                error: toErrorText(r.reason, errorSanitizer),
               },
         );
 
@@ -157,7 +166,7 @@ export function registerLayeredSearch(
           structured,
         );
       } catch (error) {
-        return errorResult(toErrorText(error));
+        return errorResult(toErrorText(error, errorSanitizer));
       }
     },
   );

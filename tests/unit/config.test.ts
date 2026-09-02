@@ -9,8 +9,16 @@ describe("loadConfig", () => {
     expect(() => loadConfig({ NETBOX_TOKEN: "abc123" })).toThrow(/NETBOX_URL/);
   });
 
-  it("rejects a missing token and names the variable", () => {
-    expect(() => loadConfig({ NETBOX_URL: base.NETBOX_URL })).toThrow(/NETBOX_TOKEN/);
+  it("rejects a missing credential source and names both supported variables", () => {
+    expect(() => loadConfig({ NETBOX_URL: base.NETBOX_URL })).toThrow(
+      /NETBOX_TOKEN.*NETBOX_TOKEN_FILE/,
+    );
+  });
+
+  it("rejects inline and file credential sources together", () => {
+    expect(() =>
+      loadConfig({ ...base, NETBOX_TOKEN_FILE: "/run/secrets/netbox-token" }),
+    ).toThrow(/NETBOX_TOKEN.*NETBOX_TOKEN_FILE.*mutually exclusive/);
   });
 
   it("treats whitespace-only values as missing", () => {
@@ -20,6 +28,13 @@ describe("loadConfig", () => {
     expect(() => loadConfig({ NETBOX_URL: base.NETBOX_URL, NETBOX_TOKEN: "  " })).toThrow(
       /NETBOX_TOKEN/,
     );
+    expect(() =>
+      loadConfig({ NETBOX_URL: base.NETBOX_URL, NETBOX_TOKEN_FILE: "  " }),
+    ).toThrow(/NETBOX_TOKEN_FILE/);
+  });
+
+  it("uses the inline token through the credential provider", async () => {
+    await expect(loadConfig(base).credentials.getToken()).resolves.toBe("abc123");
   });
 
   it("never repeats the token in an error message", () => {
@@ -47,6 +62,28 @@ describe("loadConfig", () => {
 
   it("rejects a malformed URL", () => {
     expect(() => loadConfig({ ...base, NETBOX_URL: "not a url" })).toThrow(/not a valid/);
+  });
+
+  it("rejects userinfo, query, and fragment without echoing credentials", () => {
+    for (const url of [
+      "https://user:password@netbox.example.com",
+      "https://@netbox.example.com",
+      "https://netbox.example.com?access_token=query-secret",
+      "https://netbox.example.com#token=fragment-secret",
+    ]) {
+      const error = (() => {
+        try {
+          loadConfig({ ...base, NETBOX_URL: url });
+          expect.unreachable("expected loadConfig to reject the URL");
+        } catch (reason) {
+          return String(reason);
+        }
+      })();
+      expect(error).toMatch(/not a valid URL/);
+      expect(error).not.toContain("password");
+      expect(error).not.toContain("query-secret");
+      expect(error).not.toContain("fragment-secret");
+    }
   });
 
   it("parses the truthy spellings of NETBOX_INSECURE", () => {

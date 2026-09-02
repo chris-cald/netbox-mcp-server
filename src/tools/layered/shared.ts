@@ -15,6 +15,7 @@
 
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 
+import { getClient, type NetBoxApiProvider } from "../../client.js";
 import { CHARACTER_LIMIT } from "../../constants.js";
 import { handleApiError } from "../../errors.js";
 import type {
@@ -75,8 +76,26 @@ export function errorResult(text: string): CallToolResult {
  * their own guidance; upstream failures go through `handleApiError`, which is
  * the only code permitted to read a NetBox response body.
  */
-export function toErrorText(error: unknown): string {
-  return handleApiError(error);
+/**
+ * Formats an error before it becomes MCP tool text. Injected API adapters use
+ * this narrow contract to redact their active request secret without exposing
+ * the secret or a redactor to the tool layer.
+ */
+export type ApiErrorSanitizer = (error: unknown) => string;
+
+export function requireApiErrorSanitizer(
+  api: NetBoxApiProvider,
+  sanitize: ApiErrorSanitizer | undefined,
+): ApiErrorSanitizer {
+  if (sanitize) return sanitize;
+  if (api === getClient) return handleApiError;
+  throw new Error(
+    "An injected NetBox API requires sanitizeApiError so upstream errors cannot reach tool output.",
+  );
+}
+
+export function toErrorText(error: unknown, sanitize: ApiErrorSanitizer): string {
+  return sanitize(error);
 }
 
 /** Truncate a single-object rendering that overruns the response budget. */

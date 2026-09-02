@@ -10,6 +10,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 
+import { handleApiError } from "../../errors.js";
 import type { SchemaProvider } from "../../schema/types.js";
 import {
   clampText,
@@ -76,7 +77,7 @@ export function registerDescribe(server: McpServer, schema: SchemaProvider): voi
           describePayload(summary, described),
         );
       } catch (error) {
-        return errorResult(toErrorText(error));
+        return errorResult(toErrorText(error, handleApiError));
       }
     },
   );

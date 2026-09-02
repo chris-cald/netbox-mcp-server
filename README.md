@@ -104,14 +104,18 @@ plan you confirm before anything is written.
 [**docs/installing-the-skill.md**](docs/installing-the-skill.md) is the per-surface
 page, with exact paths and config blocks for all three places this server runs:
 
-- **Claude** (Desktop, Code, Cowork) — one step for both halves:
+- **Claude** (Desktop, Code, Cowork) — the plugin supplies the skill:
   `/plugin marketplace add ZenixSolutions/netbox-mcp-server` then
-  `/plugin install netbox-mcp@zenix-solutions`. The plugin carries the server config
-  and the skill, and prompts for the URL and token.
-- **ChatGPT desktop** (a Codex host) — TOML at `~/.codex/config.toml`, skill in
-  `~/.agents/skills/`.
+  `/plugin install netbox-mcp@zenix-solutions`. Configure the server separately with
+  the client-specific absolute `npx` path from `command -v npx`.
+- **Codex CLI** — TOML at `~/.codex/config.toml`, skill in `~/.agents/skills/`; use the
+  absolute `npx` path from `command -v npx` in the config.
 - **Grok Build** (xAI's local agent) — TOML at `~/.grok/config.toml`, skill in
-  `~/.grok/skills/`; it also reads the Claude plugin above with no configuration.
+  `~/.grok/skills/`; use the same absolute launcher-path rule.
+
+ChatGPT desktop local-stdio support changes by release and plan. Do not assume it reads
+Codex configuration or prescribe a config path; check its current settings as described
+in [`AGENTS.md`](AGENTS.md).
 
 That page also covers what updates itself and what does not — briefly: Claude plugins
 do, at session start; nothing else does.
@@ -167,13 +171,16 @@ The design rationale is
 
 ## Configuration
 
-Three environment variables. There are no others.
+Four environment variables. Set `NETBOX_URL` and exactly one token source.
 
-| Variable          | Required | Default | Meaning                                                                                                                                         |
-| ----------------- | -------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
-| `NETBOX_URL`      | **yes**  | —       | Base URL of your NetBox, e.g. `https://netbox.corp.com`. **Omit `/api`** — the server appends it. A trailing `/` or `/api` is stripped for you. |
-| `NETBOX_TOKEN`    | **yes**  | —       | NetBox API token.                                                                                                                               |
-| `NETBOX_INSECURE` | no       | off     | `1`/`true`/`yes`/`y`/`on` skips TLS certificate verification. Prefer installing your internal root CA.                                          |
+| Variable            | Required | Default | Meaning                                                                                                                                                  |
+| ------------------- | -------- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NETBOX_URL`        | **yes**  | —       | Base URL of your NetBox, e.g. `https://netbox.corp.com`. **Omit `/api`** — the server appends it. A trailing `/` or `/api` is stripped for you.          |
+| `NETBOX_TOKEN`      | one of   | —       | Inline NetBox API token; retained for MCP client configuration and local development.                                                                    |
+| `NETBOX_TOKEN_FILE` | one of   | —       | Path to a readable regular file containing the token. It is mutually exclusive with `NETBOX_TOKEN` and is read before every NetBox request for rotation. |
+| `NETBOX_INSECURE`   | no       | off     | `1`/`true`/`yes`/`y`/`on` skips TLS certificate verification. Prefer installing your internal root CA.                                                   |
+
+`NETBOX_TOKEN_FILE` is intended for server-side secret mounts. The path and file contents are never exposed through MCP, logs, or errors. A file that is missing, unreadable, not a regular file, or empty fails closed with a secret-safe configuration error. Keep using `NETBOX_TOKEN` in the client config examples above unless your MCP host can securely mount a token file.
 
 The instance's OpenAPI document is fetched once and cached on disk under
 `$XDG_CACHE_HOME/netbox-mcp` (or `~/.cache/netbox-mcp`), keyed by the NetBox version and
@@ -324,7 +331,6 @@ src/
   formatting.ts       markdown rendering + pagination payload
   schema/             fetch, cache and interpret the instance's /api/schema/
   schemas/common.ts   shared Zod schemas
-  tools/layered/      the five tools: search, discover, describe, read, write
 skills/
   netbox-modeling/    agent skill, versioned with the tool contract it names
 scripts/

@@ -7,24 +7,46 @@
 
 import axios, { AxiosError } from "axios";
 
+/** Redacts one active credential from text without retaining it outside a request. */
+export type SecretRedactor = (text: string) => string;
+
+const NO_REDACTION: SecretRedactor = (text) => text;
+
+/**
+ * Make a redactor for the credential used by one outbound request.
+ *
+ * This deliberately uses string replacement rather than a token-shaped regular
+ * expression: an upstream service can reflect the exact token without an
+ * Authorization, Token, or Bearer prefix.
+ */
+export function createCredentialRedactor(token: string): SecretRedactor {
+  if (token.length === 0) return NO_REDACTION;
+  return (text: string): string => text.split(token).join("[redacted]");
+}
+
 /**
  * Convert an unknown error into a user-facing message.
  *
  * Never includes secrets: the formatters below read only the response status
  * and body, never `error.config` (which holds the Authorization header). Keep
  * it that way — any new branch that touches `error.config` must redact it.
+ * The HTTP client supplies a request-scoped redactor for body text that an
+ * upstream server might have reflected.
  */
-export function handleApiError(error: unknown): string {
+export function handleApiError(
+  error: unknown,
+  redact: SecretRedactor = NO_REDACTION,
+): string {
   if (axios.isAxiosError(error)) {
-    return formatAxiosError(error);
+    return formatAxiosError(error, redact);
   }
   if (error instanceof Error) {
-    return `Error: ${error.message}`;
+    return `Error: ${redact(error.message)}`;
   }
-  return `Error: ${String(error)}`;
+  return `Error: ${redact(String(error))}`;
 }
 
-function formatAxiosError(error: AxiosError): string {
+function formatAxiosError(error: AxiosError, redact: SecretRedactor): string {
   // Network / no response.
   if (!error.response) {
     if (error.code === "ECONNABORTED") {
@@ -45,11 +67,11 @@ function formatAxiosError(error: AxiosError): string {
         "If this is an internal NetBox with a self-signed cert, set NETBOX_INSECURE=1."
       );
     }
-    return `Error: Network error contacting NetBox: ${error.message}`;
+    return `Error: Network error contacting NetBox: ${redact(error.message)}`;
   }
 
   const status = error.response.status;
-  const bodyMessage = extractNetBoxMessage(error.response.data);
+  const bodyMessage = extractNetBoxMessage(error.response.data, redact);
 
   switch (status) {
     case 400:
@@ -169,12 +191,13 @@ const HTML_BODY =
  * something a caller can use. HTML is described rather than quoted, and
  * everything else is collapsed to one line and truncated.
  */
-function boundBodyText(text: string): string | undefined {
-  const flat = text.replace(/\s+/g, " ").trim();
+function boundBodyText(text: string, redact: SecretRedactor): string | undefined {
+  const safeText = redact(text);
+  const flat = safeText.replace(/\s+/g, " ").trim();
   if (flat.length === 0) return undefined;
-  if (HTML_BODY.test(text) || HTML_BODY.test(flat)) {
+  if (HTML_BODY.test(safeText) || HTML_BODY.test(flat)) {
     return (
-      `NetBox returned an HTML page (${text.length} characters) instead of a JSON error body; ` +
+      `NetBox returned an HTML page (${safeText.length} characters) instead of a JSON error body; ` +
       "it is not relayed. This usually means the URL did not reach the API, or a proxy or " +
       "error page answered instead of NetBox."
     );
@@ -195,13 +218,13 @@ function boundBodyText(text: string): string | undefined {
  * Every branch goes through `boundBodyText`: this is the only code that reads
  * an upstream body, so it is the only place that can bound one.
  */
-function extractNetBoxMessage(data: unknown): string | undefined {
+function extractNetBoxMessage(data: unknown, redact: SecretRedactor): string | undefined {
   if (!data) return undefined;
-  if (typeof data === "string") return boundBodyText(data);
+  if (typeof data === "string") return boundBodyText(data, redact);
   if (typeof data !== "object") return undefined;
 
   const obj = data as Record<string, unknown>;
-  if (typeof obj.detail === "string") return boundBodyText(obj.detail);
+  if (typeof obj.detail === "string") return boundBodyText(obj.detail, redact);
 
   const parts: string[] = [];
   for (const [key, val] of Object.entries(obj)) {
@@ -211,5 +234,5 @@ function extractNetBoxMessage(data: unknown): string | undefined {
       parts.push(`${key}: ${val}`);
     }
   }
-  return parts.length > 0 ? boundBodyText(parts.join(" | ")) : undefined;
+  return parts.length > 0 ? boundBodyText(parts.join(" | "), redact) : undefined;
 }

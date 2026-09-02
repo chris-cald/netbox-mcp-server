@@ -30,14 +30,18 @@ const HELP = [
   "  netbox-mcp --version      Print the version and exit.",
   "  netbox-mcp --help         Print this message and exit.",
   "",
-  "Required environment variables:",
-  "  NETBOX_URL    Base URL of the NetBox instance, e.g. https://netbox.example.com",
-  "  NETBOX_TOKEN  NetBox API token (Admin > API Tokens)",
+  "Required environment variables and credential source:",
+  "  NETBOX_URL         Base URL of the NetBox instance, e.g. https://netbox.example.com",
+  "  NETBOX_TOKEN       Inline NetBox API token (set exactly one token source)",
+  "  NETBOX_TOKEN_FILE  Readable regular file containing the token (set exactly one token source)",
   "",
   "Optional environment variables:",
   "  NETBOX_INSECURE     Set to 1/true/yes to disable TLS certificate verification.",
   "                      This exposes the token to anyone able to intercept the",
   "                      connection. Prefer installing your internal root CA.",
+  "",
+  "NETBOX_TOKEN_FILE is read before every NetBox request so token rotation takes",
+  "effect without restart. File paths and token values are never reported.",
   "",
   "Write access is controlled by the NetBox token, not by this server. Create",
   "the token with 'write enabled' unchecked, and constrain its object",
@@ -50,7 +54,8 @@ const HELP = [
 
 async function runStdio(): Promise<void> {
   try {
-    loadConfig();
+    const config = loadConfig();
+    await config.credentials.getToken();
   } catch (err) {
     console.error(err instanceof Error ? err.message : String(err));
     process.exit(EX_CONFIG);
@@ -77,6 +82,7 @@ async function main(): Promise<void> {
   if (argv.includes("--check")) {
     try {
       const config = loadConfig();
+      await config.credentials.getToken();
       console.log(
         `ok: ${SERVER_NAME} v${SERVER_VERSION} configured for ${config.baseUrl}`,
       );

@@ -8,14 +8,19 @@ There are two halves, and they are useful separately but designed together:
   fields, deprecated models, the plan-then-write loop. Without it the assistant has
   the tools and guesses at how to use them.
 
-All three surfaces below run the same thing: a local **stdio** server launched with
-`npx`. None of them needs an HTTP transport, a hosted endpoint, or an account with us.
+The supported local clients below run the server over **stdio**. None needs an
+HTTP transport or a hosted endpoint. GUI clients must use the absolute path from
+`command -v npx`; do not configure a bare `npx` command.
 
-| Surface                        | MCP config                                       | Skills directory                       | One step for both?  |
-| ------------------------------ | ------------------------------------------------ | -------------------------------------- | ------------------- |
-| Claude (Desktop, Code, Cowork) | plugin manifest, or `claude_desktop_config.json` | bundled in the plugin                  | **Yes** — plugin    |
-| ChatGPT desktop (Codex)        | `~/.codex/config.toml`                           | `~/.agents/skills/`                    | No                  |
-| Grok Build                     | `~/.grok/config.toml`                            | `~/.grok/skills/` or `./.grok/skills/` | Yes, via the plugin |
+| Surface                        | MCP config                               | Skills directory                       | One step for both? |
+| ------------------------------ | ---------------------------------------- | -------------------------------------- | ------------------ |
+| Claude (Desktop, Code, Cowork) | client config; plugin supplies the skill | bundled in the plugin                  | No                 |
+| Codex CLI                      | `~/.codex/config.toml`                   | `~/.agents/skills/`                    | No                 |
+| Grok Build                     | `~/.grok/config.toml`                    | `~/.grok/skills/` or `./.grok/skills/` | No                 |
+
+ChatGPT desktop local-stdio support and its setup UI vary by release and plan. This
+document does not prescribe a config path or UI flow for it; follow the current app
+settings and the guidance in [`AGENTS.md`](../AGENTS.md) instead.
 
 **Grok Bot is not on this list on purpose.** xAI's cloud desktop GUI app (the one that
 authenticates with a Cursor account) runs its agent on a cloud VM, so it cannot reach a
@@ -37,23 +42,18 @@ document will work; use Grok Build.
 
 ### Recommended: install the plugin
 
-The plugin carries the MCP server config _and_ the skill, so this is the only route
-that does both halves in one step.
+The plugin carries the skill. Configure the MCP server separately with the absolute
+launcher path required by your Claude client; the plugin does not provide a portable GUI
+launcher.
 
 ```
 /plugin marketplace add ZenixSolutions/netbox-mcp-server
 /plugin install netbox-mcp@zenix-solutions
 ```
 
-Claude then prompts for the two values the server needs:
-
-| Prompt               | Value                        | Stored                                              |
-| -------------------- | ---------------------------- | --------------------------------------------------- |
-| **NetBox URL**       | `https://netbox.example.com` | `settings.json`                                     |
-| **NetBox API token** | your token                   | secure storage — marked `sensitive` in the manifest |
-
-Nothing else is required by hand. You do not edit a config file, and you do not paste
-the token into a file that a backup or a screen share can pick up.
+Then configure the server by hand exactly as in the [README quick start](../README.md#quick-start)
+or [`AGENTS.md`](../AGENTS.md). Those instructions use an absolute `npx` (or `node`)
+path and the client-specific credential location.
 
 ### Verify it loaded
 
@@ -88,24 +88,10 @@ take a knowledge document rather than a skill).
 
 ---
 
-## ChatGPT desktop (Codex)
+## Codex CLI
 
-Since the Codex app merged into ChatGPT desktop, ChatGPT desktop is a Codex host: it
-reads Codex's config and Codex's skill directory. The config is **TOML, not JSON** —
-pasting a `mcpServers` JSON block here does nothing.
-
-### Route A — the UI
-
-**Settings → MCP servers → Add server → STDIO**, then:
-
-| Field       | Value                                                |
-| ----------- | ---------------------------------------------------- |
-| Name        | `netbox`                                             |
-| Command     | `npx`                                                |
-| Arguments   | `-y` and `@zenixsolutions/netbox-mcp@0.2.0`          |
-| Environment | `NETBOX_URL` = your URL, `NETBOX_TOKEN` = your token |
-
-### Route B — the config file
+Codex CLI uses TOML, not a `mcpServers` JSON block. Use the absolute path returned by
+`command -v npx` (or `command -v node` for a clone), as documented in `AGENTS.md`.
 
 | OS      | Path                               |
 | ------- | ---------------------------------- |
@@ -117,7 +103,7 @@ Append this. Do not replace the file — it holds your other settings.
 
 ```toml
 [mcp_servers.netbox]
-command = "npx"
+command = "ABSOLUTE_PATH_FROM_COMMAND_V_NPX"
 args = ["-y", "@zenixsolutions/netbox-mcp@0.2.0"]
 # The first launch downloads the package; the default 10s is not enough for it.
 startup_timeout_sec = 30
@@ -131,11 +117,11 @@ NETBOX_TOKEN = "paste-your-token-here"
 
 Three things that bite here:
 
-- **Use the global file.** A project-scoped `.codex/config.toml` is known not to load
-  reliably. Put the server in `~/.codex/config.toml` and it works everywhere.
-- **Windows.** `npx` is `npx.cmd`. If the server fails to spawn, run `where npx` and use
-  that absolute path as `command`, with backslashes escaped or the string written as a
-  TOML literal: `command = 'C:\Program Files\nodejs\npx.cmd'`.
+- **Use the global file.** Add this table to `~/.codex/config.toml`; do not replace
+  existing settings.
+- **Absolute launcher path.** Replace `ABSOLUTE_PATH_FROM_COMMAND_V_NPX` with the exact
+  output of `command -v npx`. On Windows use the absolute `npx.cmd` path from `where npx`,
+  with TOML-appropriate escaping.
 - **The token is now in a plain file.** Restrict it: `chmod 600 ~/.codex/config.toml`.
 
 ### Approvals — your annotations do the gating
@@ -179,8 +165,8 @@ ln -s "$PWD/skills/netbox-modeling" ~/.agents/skills/netbox-modeling
 
 ### Verify it loaded
 
-1. Restart ChatGPT desktop.
-2. **Settings → MCP servers** shows `netbox` as connected with 5 tools.
+1. Restart Codex CLI.
+2. Verify its MCP-server listing shows `netbox` connected with 5 tools.
 3. Ask: _"Using the netbox tools, list the first 5 sites."_
 4. Skill: `ls ~/.agents/skills/netbox-modeling/SKILL.md` exists, and the assistant plans
    before writing.
@@ -190,22 +176,10 @@ ln -s "$PWD/skills/netbox-modeling" ~/.agents/skills/netbox-modeling
 ## Grok Build
 
 Grok Build is xAI's **locally installed** agent (`curl -fsSL https://x.ai/cli/install.sh | bash`).
-It has two routes, and the first is less work.
+The Claude plugin can supply its skill, but configure the MCP server explicitly with an
+absolute launcher path.
 
-### Route A — reuse the Claude plugin
-
-Grok Build reads Claude Code marketplaces, plugins, skills, MCP config and `CLAUDE.md`
-with no configuration at all. It also picks up MCP servers from `~/.claude.json`,
-`.cursor/mcp.json` and a project `.mcp.json`. So if you already installed the plugin for
-Claude on this machine, Grok Build has the server and the skill already — there is
-nothing to do. If you have not:
-
-```
-/plugin marketplace add ZenixSolutions/netbox-mcp-server
-/plugin install netbox-mcp@zenix-solutions
-```
-
-### Route B — Grok's own config
+### Grok's own config
 
 | OS      | Path                              |
 | ------- | --------------------------------- |
@@ -217,7 +191,7 @@ Same TOML shape as Codex:
 
 ```toml
 [mcp_servers.netbox]
-command = "npx"
+command = "ABSOLUTE_PATH_FROM_COMMAND_V_NPX"
 args = ["-y", "@zenixsolutions/netbox-mcp@0.2.0"]
 startup_timeout_sec = 30
 tool_timeout_sec = 120
@@ -227,6 +201,7 @@ NETBOX_URL = "https://netbox.example.com"
 NETBOX_TOKEN = "paste-your-token-here"
 ```
 
+Replace `ABSOLUTE_PATH_FROM_COMMAND_V_NPX` with the exact output of `command -v npx`.
 `chmod 600 ~/.grok/config.toml` — the token is in it.
 
 The skill goes in `~/.grok/skills/` (every project) or `./.grok/skills/` (this project):
@@ -301,9 +276,9 @@ minutes after a session starts, with jitter. Two conditions:
   nothing for an installed user until that string changes. Bumping it is what ships an
   update — see [releasing.md](releasing.md).
 
-**Nothing else updates.** ChatGPT desktop and Grok Build read the skill from disk at
-startup; a newer version in this repository does not reach them. Re-download and unpack
-the `.skill`, or use the symlink-to-a-clone trick above and `git pull`. The MCP server
+**Nothing else updates.** Codex CLI and Grok Build read the skill from disk at startup;
+a newer version in this repository does not reach them. Re-download and unpack the
+`.skill`, or use the symlink-to-a-clone trick above and `git pull`. The MCP server
 itself is a partial exception: `npx` fetches from npm at launch, so unpinning the version
 in your config gets you server updates without getting you skill updates — which is
 usually worse than pinning, because the skill and the tool surface are versioned
@@ -312,9 +287,8 @@ together on purpose.
 **Nothing checks weekly, on any surface.** This is worth stating plainly because it is
 the thing people assume:
 
-- ChatGPT Scheduled Tasks and Grok Automations can run on a schedule and send you a
-  message. They **cannot write back** to stored skills, custom instructions or project
-  files.
+- Scheduled reminders can send you a message, but they **cannot write back** to stored
+  skills, custom instructions or project files.
 - So a weekly _"the skill you have is three versions behind"_ **alarm** is achievable. A
   weekly **refresh** is not. An alarm is a reminder to do the update by hand; it is not
   the update.

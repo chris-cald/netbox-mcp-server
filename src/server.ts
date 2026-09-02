@@ -15,6 +15,7 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 
 import { createNetBoxClient, type NetBoxApi } from "./client.js";
 import { loadConfig, type NetBoxConfig } from "./config.js";
+import { handleApiError } from "./errors.js";
 import { createSchemaProviderForConfig } from "./schema/index.js";
 import type { SchemaProvider } from "./schema/types.js";
 import { registerLayeredTools } from "./tools/layered/index.js";
@@ -54,11 +55,26 @@ function unconfiguredProvider(reason: string): SchemaProvider {
   };
 }
 
+export interface InjectedNetBoxApi {
+  /** The server-scoped operations exposed to the layered tools. */
+  api: NetBoxApi;
+  /**
+   * Turns a failed injected request into safe MCP text while that adapter's
+   * active credential is still in scope. It must redact reflected secrets and
+   * must not expose credentials or redaction functions to MCP/tool adapters.
+   */
+  sanitizeApiError: (error: unknown) => string;
+}
+
 export interface BuildServerOptions {
   /** Override the schema provider. Tests use this; nothing else should. */
   schema?: SchemaProvider | undefined;
-  /** Server-scoped API dependency. Tests and hosted transports may inject it. */
-  api?: NetBoxApi | undefined;
+  /**
+   * Server-scoped API dependency. Injected adapters must sanitize errors at
+   * their credential boundary rather than allowing raw upstream errors into
+   * MCP tool results.
+   */
+  api?: InjectedNetBoxApi | undefined;
 }
 
 /**
@@ -68,11 +84,29 @@ export interface BuildServerOptions {
  * instance during construction — the schema document is fetched lazily on the
  * first tool call that needs it. A session that only lists tools pays nothing.
  */
+function assertInjectedApi(dependency: InjectedNetBoxApi): void {
+  if (typeof dependency.sanitizeApiError !== "function") {
+    throw new Error(
+      "An injected NetBox API requires sanitizeApiError so upstream errors cannot reach tool output.",
+    );
+  }
+  const api = dependency.api;
+  if (
+    !api ||
+    ["list", "get", "create", "update", "del"].some(
+      (method) => typeof api[method as keyof NetBoxApi] !== "function",
+    )
+  ) {
+    throw new Error("An injected NetBox API must implement every NetBoxApi method.");
+  }
+}
+
 export function buildServer(
   env: NodeJS.ProcessEnv = process.env,
   options: BuildServerOptions = {},
 ): McpServer {
   const server = new McpServer({ name: SERVER_NAME, version: SERVER_VERSION });
+  if (options.api) assertInjectedApi(options.api);
 
   let config: NetBoxConfig | undefined;
   const loadServerConfig = (): NetBoxConfig => {
@@ -93,14 +127,22 @@ export function buildServer(
   }
 
   // Construct the HTTP client only on the first execution call. Unlike the
-  // legacy `getClient` adapter, this cache belongs to this server instance.
-  let api = options.api;
+  // legacy `getClient` adapter, this cache belongs to this server instance and
+  // therefore cannot couple stdio, future HTTP sessions, or test credentials.
+  let api = options.api?.api;
   const getServerApi = (): NetBoxApi => {
     if (!api) api = createNetBoxClient(loadServerConfig());
     return api;
   };
 
-  registerLayeredTools(server, schema, getServerApi);
+  // The built-in client sanitizes while its request-scoped credential is in
+  // scope. An injected client supplies the same narrow boundary explicitly.
+  registerLayeredTools(
+    server,
+    schema,
+    getServerApi,
+    options.api ? options.api.sanitizeApiError : handleApiError,
+  );
   return server;
 }
 

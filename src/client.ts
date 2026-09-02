@@ -7,11 +7,13 @@
  * TLS options from their configuration.
  */
 
-import axios, { AxiosError, AxiosInstance } from "axios";
+import axios, { AxiosError, AxiosInstance, AxiosResponse } from "axios";
+import http from "node:http";
 import https from "node:https";
 
 import { loadConfig, NetBoxConfig } from "./config.js";
 import { DEFAULT_TIMEOUT_MS } from "./constants.js";
+import { createCredentialRedactor, handleApiError } from "./errors.js";
 
 let cachedClient: NetBoxClient | null = null;
 
@@ -22,7 +24,11 @@ export interface PaginatedResponse<T> {
   results: T[];
 }
 
-/** The narrow NetBox REST operations the tool layer may use. */
+/**
+ * The narrow NetBox REST operations the tool layer may use. It deliberately
+ * exposes collection-relative methods rather than arbitrary URLs, so injected
+ * implementations retain the same endpoint boundary as the default client.
+ */
 export interface NetBoxApi {
   list<T>(
     endpoint: string,
@@ -41,37 +47,51 @@ export interface NetBoxApi {
 /** Supplies an API at call time, preserving lazy tool construction. */
 export type NetBoxApiProvider = () => NetBoxApi;
 
+export interface NetBoxClientOptions {
+  /** Injectable transport seam for tests; normal clients create Axios themselves. */
+  http?: AxiosInstance | undefined;
+  /** Injectable DNS seam for HTTP integration tests. */
+  httpAgent?: http.Agent | undefined;
+}
+
 export class NetBoxClient implements NetBoxApi {
   readonly config: NetBoxConfig;
   private readonly http: AxiosInstance;
 
-  constructor(config: NetBoxConfig) {
+  constructor(config: NetBoxConfig, options: NetBoxClientOptions = {}) {
     this.config = config;
-    this.http = axios.create({
-      baseURL: config.apiUrl,
-      timeout: DEFAULT_TIMEOUT_MS,
-      headers: {
-        Authorization: `Token ${config.token}`,
-        Accept: "application/json",
-        "Content-Type": "application/json",
-      },
-      // Axios serialises an array as `name[]=a&name[]=b`. NetBox's filters
-      // expect the parameter REPEATED — `name=a&name=b` — and, worse, NetBox
-      // silently ignores a parameter it does not recognise and returns the
-      // complete unfiltered collection. So `name[]=` did not error: it dropped
-      // the filter and answered with everything, which a caller cannot tell
-      // from a genuinely unfiltered match.
-      //
-      // The local filter-name validation does not catch this. The caller sends
-      // `name`, which is a real parameter, and the corruption happens after
-      // validation, during serialisation.
-      paramsSerializer: { serialize: repeatParams },
-      httpsAgent: config.insecure
-        ? new https.Agent({ rejectUnauthorized: false })
-        : undefined,
-      // Reject only on >= 500 so we can surface NetBox's error body verbatim.
-      validateStatus: (status) => status < 500,
-    });
+    this.http =
+      options.http ??
+      axios.create({
+        baseURL: config.apiUrl,
+        timeout: DEFAULT_TIMEOUT_MS,
+        headers: {
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        // Axios serialises an array as `name[]=a&name[]=b`. NetBox's filters
+        // expect the parameter REPEATED — `name=a&name=b` — and, worse, NetBox
+        // silently ignores a parameter it does not recognise and returns the
+        // complete unfiltered collection. So `name[]=` did not error: it dropped
+        // the filter and answered with everything, which a caller cannot tell
+        // from a genuinely unfiltered match.
+        //
+        // The local filter-name validation does not catch this. The caller sends
+        // `name`, which is a real parameter, and the corruption happens after
+        // validation, during serialisation.
+        paramsSerializer: { serialize: repeatParams },
+        httpAgent: options.httpAgent,
+        httpsAgent: config.insecure
+          ? new https.Agent({ rejectUnauthorized: false })
+          : undefined,
+        // `follow-redirects` historically preserves Authorization for a
+        // subdomain redirect. A subdomain is a separate origin and must never
+        // receive a NetBox token. Same-origin redirects retain it.
+        beforeRedirect: (options) =>
+          stripAuthorizationOnCrossOriginRedirect(options, new URL(config.apiUrl).origin),
+        // Reject only on >= 500 so we can surface NetBox's error body verbatim.
+        validateStatus: (status) => status < 500,
+      });
   }
 
   /**
@@ -82,30 +102,30 @@ export class NetBoxClient implements NetBoxApi {
     endpoint: string,
     params: Record<string, unknown> = {},
   ): Promise<PaginatedResponse<T>> {
-    const response = await this.http.get(`/${endpoint}/`, {
-      params: cleanParams(params),
-    });
-    if (response.status >= 400) {
-      throw axiosLikeError(response);
-    }
+    const response = await this.request((authorization) =>
+      this.http.get(`/${endpoint}/`, {
+        params: cleanParams(params),
+        headers: { Authorization: authorization },
+      }),
+    );
     return response.data as PaginatedResponse<T>;
   }
 
   /** GET /<endpoint>/<id>/ */
   async get<T>(endpoint: string, id: number | string): Promise<T> {
-    const response = await this.http.get(`/${endpoint}/${id}/`);
-    if (response.status >= 400) {
-      throw axiosLikeError(response);
-    }
+    const response = await this.request((authorization) =>
+      this.http.get(`/${endpoint}/${id}/`, { headers: { Authorization: authorization } }),
+    );
     return response.data as T;
   }
 
   /** POST /<endpoint>/ with a JSON body. */
   async create<T>(endpoint: string, body: Record<string, unknown>): Promise<T> {
-    const response = await this.http.post(`/${endpoint}/`, cleanParams(body));
-    if (response.status >= 400) {
-      throw axiosLikeError(response);
-    }
+    const response = await this.request((authorization) =>
+      this.http.post(`/${endpoint}/`, cleanParams(body), {
+        headers: { Authorization: authorization },
+      }),
+    );
     return response.data as T;
   }
 
@@ -115,30 +135,53 @@ export class NetBoxClient implements NetBoxApi {
     id: number | string,
     body: Record<string, unknown>,
   ): Promise<T> {
-    const response = await this.http.patch(`/${endpoint}/${id}/`, cleanParams(body));
-    if (response.status >= 400) {
-      throw axiosLikeError(response);
-    }
+    const response = await this.request((authorization) =>
+      this.http.patch(`/${endpoint}/${id}/`, cleanParams(body), {
+        headers: { Authorization: authorization },
+      }),
+    );
     return response.data as T;
   }
 
   /** DELETE /<endpoint>/<id>/ */
   async del(endpoint: string, id: number | string): Promise<void> {
-    const response = await this.http.delete(`/${endpoint}/${id}/`);
-    if (response.status >= 400) {
-      throw axiosLikeError(response);
-    }
+    await this.request((authorization) =>
+      this.http.delete(`/${endpoint}/${id}/`, {
+        headers: { Authorization: authorization },
+      }),
+    );
   }
 
   /** GET /<path>/ with raw query params. Used for global search. */
   async raw<T>(path: string, params: Record<string, unknown> = {}): Promise<T> {
-    const response = await this.http.get(path.startsWith("/") ? path : `/${path}`, {
-      params: cleanParams(params),
-    });
-    if (response.status >= 400) {
-      throw axiosLikeError(response);
-    }
+    const response = await this.request((authorization) =>
+      this.http.get(path.startsWith("/") ? path : `/${path}`, {
+        params: cleanParams(params),
+        headers: { Authorization: authorization },
+      }),
+    );
     return response.data as T;
+  }
+
+  /**
+   * Keep a credential and its redactor together for exactly one request. The
+   * resulting error is already safe text, so tools never receive credentials
+   * or redaction capabilities.
+   */
+  private async request<T>(
+    send: (authorization: string) => Promise<AxiosResponse<T>>,
+  ): Promise<AxiosResponse<T>> {
+    const token = await this.config.credentials.getToken();
+    try {
+      const response = await send(`Token ${token}`);
+      if (response.status >= 400) throw axiosLikeError(response);
+      return response;
+    } catch (error) {
+      // Do not retain the original Axios error as a cause: an inspector can
+      // log its response body or request config. The returned Error contains
+      // only text redacted while this request's credential was in scope.
+      throw redactedRequestError(handleApiError(error, createCredentialRedactor(token)));
+    }
   }
 }
 
@@ -186,6 +229,31 @@ function paramValue(value: unknown): string | undefined {
   return undefined;
 }
 
+/** Remove the request credential unless the redirect target is exactly the API origin. */
+function stripAuthorizationOnCrossOriginRedirect(
+  options: Record<string, unknown>,
+  apiOrigin: string,
+): void {
+  const headers = options.headers;
+  const target = options.href;
+  const isSameOrigin =
+    typeof target === "string" &&
+    (() => {
+      try {
+        return new URL(target).origin === apiOrigin;
+      } catch {
+        return false;
+      }
+    })();
+  if (isSameOrigin || !headers || typeof headers !== "object") return;
+
+  for (const name of Object.keys(headers)) {
+    if (name.toLowerCase() === "authorization") {
+      delete (headers as Record<string, unknown>)[name];
+    }
+  }
+}
+
 function cleanParams(params: Record<string, unknown>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(params)) {
@@ -210,9 +278,17 @@ function axiosLikeError(response: { status: number; data: unknown }): Error {
   return err;
 }
 
+/** Construct a safe error without retaining an Axios error as its cause. */
+function redactedRequestError(message: string): Error {
+  return new Error(message);
+}
+
 /** Build an isolated client for one server instance or test. */
-export function createNetBoxClient(config: NetBoxConfig): NetBoxApi {
-  return new NetBoxClient(config);
+export function createNetBoxClient(
+  config: NetBoxConfig,
+  options?: NetBoxClientOptions,
+): NetBoxApi {
+  return new NetBoxClient(config, options);
 }
 
 /**

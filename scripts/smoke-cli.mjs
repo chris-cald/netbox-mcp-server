@@ -20,12 +20,16 @@ if (!existsSync(ENTRY)) {
 }
 
 /** Run the built binary with a clean environment for the config variables. */
-function run(args) {
+function run(args, overrides = {}) {
   const env = { ...process.env };
   delete env["NETBOX_URL"];
   delete env["NETBOX_TOKEN"];
+  delete env["NETBOX_TOKEN_FILE"];
   delete env["NETBOX_INSECURE"];
-  return spawnSync(process.execPath, [ENTRY, ...args], { encoding: "utf8", env });
+  return spawnSync(process.execPath, [ENTRY, ...args], {
+    encoding: "utf8",
+    env: { ...env, ...overrides },
+  });
 }
 
 let failures = 0;
@@ -56,17 +60,28 @@ check(
   `status=${help.status}`,
 );
 
-const list = run(["--list-tools"]);
-const toolNames = list.stdout.trim().split(/\r?\n/).filter(Boolean);
+const expectedListToolsStdout =
+  "netbox_global_search\nnetbox_discover\nnetbox_describe\nnetbox_read\nnetbox_write\n";
+const expectedListToolsStderr = "5 tools registered.\n";
+function hasExactListToolsOutput(stdout, stderr) {
+  return stdout === expectedListToolsStdout && stderr === expectedListToolsStderr;
+}
+
+// These fixtures prove that leading or trailing blank output is a contract failure.
 check(
-  "--list-tools works with no NetBox configured",
-  list.status === 0 && toolNames.length > 0,
-  `status=${list.status} tools=${toolNames.length}`,
+  "--list-tools exact output comparison rejects leading or trailing blank output",
+  !hasExactListToolsOutput(`\n${expectedListToolsStdout}`, expectedListToolsStderr) &&
+    !hasExactListToolsOutput(`${expectedListToolsStdout}\n`, expectedListToolsStderr) &&
+    !hasExactListToolsOutput(expectedListToolsStdout, `\n${expectedListToolsStderr}`) &&
+    !hasExactListToolsOutput(expectedListToolsStdout, `${expectedListToolsStderr}\n`),
+  "a leading or trailing blank line was accepted",
 );
+
+const list = run(["--list-tools"]);
 check(
-  "every listed tool is namespaced",
-  toolNames.every((n) => n.startsWith("netbox_")),
-  `got ${JSON.stringify(toolNames)}`,
+  "--list-tools reports exactly the five ordered tool names and one trailing newline",
+  list.status === 0 && hasExactListToolsOutput(list.stdout, list.stderr),
+  `status=${list.status} stdout=${JSON.stringify(list.stdout)} stderr=${JSON.stringify(list.stderr)}`,
 );
 
 const uncheck = run(["--check"]);
@@ -81,13 +96,9 @@ check(
   "the message did not name NETBOX_URL",
 );
 
-const configured = spawnSync(process.execPath, [ENTRY, "--check"], {
-  encoding: "utf8",
-  env: {
-    ...process.env,
-    NETBOX_URL: "https://netbox.invalid",
-    NETBOX_TOKEN: "smoke-test-token",
-  },
+const configured = run(["--check"], {
+  NETBOX_URL: "https://netbox.invalid",
+  NETBOX_TOKEN: "smoke-test-token",
 });
 check(
   "--check exits 0 when configured, without contacting NetBox",

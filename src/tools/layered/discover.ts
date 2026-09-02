@@ -12,6 +12,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 
 import { CHARACTER_LIMIT } from "../../constants.js";
+import { handleApiError } from "../../errors.js";
 import { buildListPayload } from "../../formatting.js";
 import type { ObjectTypeSummary, SchemaProvider } from "../../schema/types.js";
 import { errorResult, textResult, toErrorText } from "./shared.js";
@@ -93,7 +94,7 @@ export function registerDiscover(server: McpServer, schema: SchemaProvider): voi
           netbox_version: version,
         });
       } catch (error) {
-        return errorResult(toErrorText(error));
+        return errorResult(toErrorText(error, handleApiError));
       }
     },
   );

@@ -20,7 +20,7 @@ progress toward a fix.
 
 In scope:
 
-- Leakage of the `NETBOX_TOKEN` into logs, tool responses, error messages, or files
+- Leakage of `NETBOX_TOKEN`, `NETBOX_TOKEN_FILE` contents, auth headers, or token-file paths into logs, tool responses, error messages, or files
 - Any path by which a tool call reaches a NetBox endpoint the caller did not intend —
   in particular, any way to make `object_type` resolve to an endpoint outside the
   registry, or to smuggle a path or URL through it
@@ -96,6 +96,8 @@ original's permissions, and nothing cleans it up. Set an expiry on every token, 
 tokens to the office IP range if your NetBox deployment supports it, and rotate them when
 someone leaves — and remember that rotating a token does not help if an old copy of the
 config still holds the previous one.
+
+**Token files are an optional server-side credential source.** Set exactly one of `NETBOX_TOKEN` and `NETBOX_TOKEN_FILE`. The latter must name a readable regular file containing the token; it is read immediately before every NetBox request, so a secret-manager rotation is picked up without restarting the server. The file path and contents are deliberately never included in errors, logs, MCP arguments, or MCP results. Mount it with access limited to the server process and replace it atomically; an absent, unreadable, non-file, or empty rotation fails closed.
 
 **`NETBOX_INSECURE=1` disables TLS certificate validation entirely**, which exposes the
 token to anyone able to intercept the connection. Prefer installing your internal root CA
