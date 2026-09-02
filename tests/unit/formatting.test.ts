@@ -131,10 +131,18 @@ describe("enforceCharacterLimit", () => {
     expect(result.text).toContain(`offset=${result.payload.next_offset}`);
   });
 
-  it("keeps at least one item even when a single item is enormous", () => {
+  it("omits an enormous first item and marks the unadvanced offset", () => {
     const huge = [{ id: 1, name: "big", comments: "x".repeat(CHARACTER_LIMIT * 2) }];
     const payload = buildListPayload(huge, 1, 50, 0);
     const result = enforceCharacterLimit(render(huge), payload, render);
-    expect(result.payload.items.length).toBe(1);
+    expect(result.payload).toMatchObject({
+      items: [],
+      count: 0,
+      items_truncated: true,
+      has_more: true,
+      next_offset: 0,
+    });
+    expect(result.text).toContain("first item is too large");
+    expect(result.text).not.toContain("offset=0");
   });
 });

@@ -54,19 +54,196 @@ export function assertSafeEndpoint(endpoint: string): string {
   return endpoint;
 }
 
-/** A tool result carrying Markdown text and an optional structured payload. */
+/** Reserve enough space for a useful text explanation beside structured JSON. */
+const MIN_TEXT_RESULT_CHARS = 512;
+const STRUCTURED_TRUNCATION =
+  "Structured content was truncated to fit the complete MCP result budget.";
+
+function serializedLength(value: unknown): number {
+  try {
+    const serialized = JSON.stringify(value);
+    return serialized === undefined ? Number.POSITIVE_INFINITY : serialized.length;
+  } catch {
+    return Number.POSITIVE_INFINITY;
+  }
+}
+
+function compactAction(action: Record<string, unknown>): Record<string, unknown> {
+  return {
+    name: action.name,
+    target_resource_type: action.target_resource_type,
+    classification: action.classification,
+    native: action.native,
+  };
+}
+
+/**
+ * Return a machine-readable truncation envelope even when no one response item
+ * fits. Keeping an oversized first item was both over budget and misleading:
+ * callers need to know that they must filter or request a narrower object.
+ */
+function fallbackStructuredContent(
+  value: Record<string, unknown>,
+): Record<string, unknown> {
+  const fallback: Record<string, unknown> = {
+    structured_content_truncated: true,
+    truncation: STRUCTURED_TRUNCATION,
+  };
+  for (const key of ["operation", "target", "object_type", "total", "offset", "limit"]) {
+    const candidate = value[key];
+    if (
+      typeof candidate === "string" ||
+      typeof candidate === "number" ||
+      typeof candidate === "boolean"
+    ) {
+      fallback[key] = candidate;
+    }
+  }
+  if (Array.isArray(value.items)) {
+    fallback.items = [];
+    fallback.count = 0;
+    fallback.has_more = true;
+    fallback.next_offset = typeof value.offset === "number" ? value.offset : 0;
+    fallback.items_truncated = true;
+  }
+  if (Array.isArray(value.result)) {
+    fallback.result = [];
+    fallback.result_truncated = true;
+  }
+  if (value.action && typeof value.action === "object" && !Array.isArray(value.action)) {
+    fallback.action = compactAction(value.action as Record<string, unknown>);
+    fallback.action_metadata_truncated = true;
+  }
+  return fallback;
+}
+
+function truncatedArrayPayload(
+  value: Record<string, unknown>,
+  key: "items" | "result",
+  items: unknown[],
+): Record<string, unknown> {
+  const payload: Record<string, unknown> = {
+    ...value,
+    [key]: items,
+    structured_content_truncated: true,
+    truncation: STRUCTURED_TRUNCATION,
+  };
+  if (key === "items") {
+    payload.count = items.length;
+    payload.has_more = true;
+    payload.next_offset =
+      typeof value.offset === "number" ? value.offset + items.length : items.length;
+    payload.items_truncated = true;
+  } else {
+    payload.result_truncated = true;
+  }
+  return payload;
+}
+
+/**
+ * Bound structured content as a whole. Tool-specific renderers may make a
+ * tighter representation first, but this is the final invariant for every
+ * normal result and error path. It deliberately permits an empty `items` or
+ * `result` array when its first element alone exceeds the budget.
+ */
+function boundStructuredContent(
+  structuredContent: Record<string, unknown>,
+  budget: number,
+): Record<string, unknown> {
+  if (serializedLength(structuredContent) <= budget) return structuredContent;
+
+  const fitArray = (
+    value: Record<string, unknown>,
+  ): Record<string, unknown> | undefined => {
+    for (const key of ["items", "result"] as const) {
+      const source = value[key];
+      if (!Array.isArray(source)) continue;
+      let lo = 0;
+      let hi = source.length;
+      let best = -1;
+      while (lo <= hi) {
+        const middle = Math.floor((lo + hi) / 2);
+        const candidate = truncatedArrayPayload(value, key, source.slice(0, middle));
+        if (serializedLength(candidate) <= budget) {
+          best = middle;
+          lo = middle + 1;
+        } else {
+          hi = middle - 1;
+        }
+      }
+      if (best >= 0) return truncatedArrayPayload(value, key, source.slice(0, best));
+    }
+    return undefined;
+  };
+
+  const arrayBounded = fitArray(structuredContent);
+  if (arrayBounded) return arrayBounded;
+
+  // Schema-derived action metadata is independently useful, but must not
+  // crowd every result item out of the envelope that carries it.
+  const action = structuredContent.action;
+  if (action && typeof action === "object" && !Array.isArray(action)) {
+    const compacted = {
+      ...structuredContent,
+      action: compactAction(action as Record<string, unknown>),
+      action_metadata_truncated: true,
+      structured_content_truncated: true,
+      truncation: STRUCTURED_TRUNCATION,
+    };
+    if (serializedLength(compacted) <= budget) return compacted;
+    const compactedArray = fitArray(compacted);
+    if (compactedArray) return compactedArray;
+  }
+
+  const fallback = fallbackStructuredContent(structuredContent);
+  // The fallback contains only fixed field names and bounded primitive values,
+  // but do not trust an unusual injected provider to honour that assumption.
+  if (serializedLength(fallback) <= budget) return fallback;
+  return { structured_content_truncated: true, truncation: STRUCTURED_TRUNCATION };
+}
+
+function boundedText(text: string, budget: number): string {
+  if (text.length <= budget) return text;
+  const suffix = "\n\n---\n_Response truncated to fit the complete MCP result budget._";
+  if (budget <= suffix.length) return budget <= 1 ? "" : `${text.slice(0, budget - 1)}…`;
+  // Renderers put continuation instructions at the end. Preserve that tail as
+  // well as the opening context rather than cutting a paginated response just
+  // before the offset needed to resume it.
+  const available = budget - suffix.length;
+  const tailLength = Math.min(256, Math.floor(available / 2));
+  const headLength = available - tailLength - 1;
+  return `${text.slice(0, headLength)}…${text.slice(-tailLength)}${suffix}`;
+}
+
+/**
+ * A tool result carrying Markdown text and an optional structured payload.
+ * The text plus serialized `structuredContent` is always within one shared
+ * MCP response budget; this boundary covers every registered tool.
+ */
 export function textResult(
   text: string,
   structuredContent?: Record<string, unknown>,
 ): CallToolResult {
-  const result: CallToolResult = { content: [{ type: "text", text }] };
-  if (structuredContent) result.structuredContent = structuredContent;
-  return result;
+  if (!structuredContent) {
+    return { content: [{ type: "text", text: boundedText(text, CHARACTER_LIMIT) }] };
+  }
+  const payload = boundStructuredContent(
+    structuredContent,
+    CHARACTER_LIMIT - MIN_TEXT_RESULT_CHARS,
+  );
+  const textBudget = Math.max(0, CHARACTER_LIMIT - serializedLength(payload));
+  return {
+    content: [{ type: "text", text: boundedText(text, textBudget) }],
+    structuredContent: payload,
+  };
 }
 
 /** A failed tool result. Always a teaching message, never a bare status code. */
 export function errorResult(text: string): CallToolResult {
-  return { isError: true, content: [{ type: "text", text }] };
+  return {
+    isError: true,
+    content: [{ type: "text", text: boundedText(text, CHARACTER_LIMIT) }],
+  };
 }
 
 /**

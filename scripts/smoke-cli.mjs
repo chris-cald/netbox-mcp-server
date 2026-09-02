@@ -61,8 +61,8 @@ check(
 );
 
 const expectedListToolsStdout =
-  "netbox_global_search\nnetbox_discover\nnetbox_describe\nnetbox_read\nnetbox_write\n";
-const expectedListToolsStderr = "5 tools registered.\n";
+  "netbox_global_search\nnetbox_discover\nnetbox_describe\nnetbox_read\nnetbox_write\nnetbox_invoke\n";
+const expectedListToolsStderr = "6 tools registered.\n";
 function hasExactListToolsOutput(stdout, stderr) {
   return stdout === expectedListToolsStdout && stderr === expectedListToolsStderr;
 }
@@ -79,7 +79,7 @@ check(
 
 const list = run(["--list-tools"]);
 check(
-  "--list-tools reports exactly the five ordered tool names and one trailing newline",
+  "--list-tools reports exactly the six ordered tool names and one trailing newline",
   list.status === 0 && hasExactListToolsOutput(list.stdout, list.stderr),
   `status=${list.status} stdout=${JSON.stringify(list.stdout)} stderr=${JSON.stringify(list.stderr)}`,
 );

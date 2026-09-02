@@ -494,8 +494,15 @@ GET|POST /api/ipam/vlan-groups/{id}/available-vlans/
 ```
 
 The `available-*` endpoints are the ones an agent will genuinely want (allocate the next free
-IP/prefix/VLAN). **Layer 3 should hand-wire those five as first-class actions**; they are not
-derivable as object types and dropping them silently loses real capability.
+IP/prefix/VLAN). **Superseded by M3a:** do not hand-wire all five merely because the paths
+exist. `netbox_invoke` exposes only a closed semantic action after the connected instance is
+NetBox 4.6.x and its full JSON request, query, and array-response contract is proven. The
+current implementation therefore exposes the two `ipam.prefix.available-ips` actions only.
+Allocation POST accepts exactly one object array item and is sent once; it is **never
+automatically retried**, preserving NetBox's allocation concurrency and conflict semantics.
+`available-prefixes`, range, and VLAN actions remain unavailable until their complete contracts
+and explicit version support are added. They are not derivable as object types, but path/method
+presence alone is not sufficient to expose them.
 
 **E. Plugin paths: none.** `/api/plugins/**` does not appear anywhere in the stock 4.6.7
 document, because it is generated from a NetBox with no plugins installed. Every plugin claim

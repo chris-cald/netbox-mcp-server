@@ -6,7 +6,7 @@
  * one-tool-per-operation surface cost 446 tools and 720,863 characters — about
  * 180,000 tokens, which does not fit in a 200k window at all.
  *
- * This is the test that proves the replacement: five tools, and a payload
+ * This is the test that proves the replacement: six tools, and a payload
  * small enough that nobody has to think about it again. The ceiling is
  * measured over the complete `tools/list` response — names, descriptions,
  * input schemas and annotations — because that is what a client receives.
@@ -25,7 +25,7 @@ import type {
 } from "../../src/schema/types.js";
 import { registerLayeredTools } from "../../src/tools/layered/index.js";
 
-const CEILING_TOOLS = 5;
+const CEILING_TOOLS = 6;
 const CEILING_CHARS = 15_000;
 
 const EXPECTED_TOOLS = [
@@ -34,6 +34,7 @@ const EXPECTED_TOOLS = [
   "netbox_global_search",
   "netbox_read",
   "netbox_write",
+  "netbox_invoke",
 ];
 
 /**
@@ -66,7 +67,7 @@ async function listTools(): Promise<Tool[]> {
 }
 
 describe("layered tool surface", () => {
-  it("is five tools and a rounding error", async () => {
+  it("is six tools and a rounding error", async () => {
     const tools = await listTools();
     const size = JSON.stringify(tools).length;
     // Reported so a regression shows the number, not just the failure.
@@ -76,9 +77,9 @@ describe("layered tool surface", () => {
     expect(size).toBeLessThan(CEILING_CHARS);
   });
 
-  it("registers exactly the five layered tools", async () => {
+  it("registers exactly the six layered tools", async () => {
     const tools = await listTools();
-    expect(tools.map((t) => t.name).sort()).toEqual(EXPECTED_TOOLS);
+    expect(tools.map((t) => t.name).sort()).toEqual([...EXPECTED_TOOLS].sort());
   });
 
   it("namespaces every tool and documents it", async () => {

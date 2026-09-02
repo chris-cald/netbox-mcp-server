@@ -1,4 +1,4 @@
-# The five-tool surface
+# The six-tool surface
 
 Exact argument shapes and behaviour. Everything here is the tool contract, not
 advice; if a tool's own description disagrees with this file, the tool wins.
@@ -157,6 +157,45 @@ Practical points:
   and shows both values. Call it without `confirm` first if you need to see the
   current value — that error tells you the `display` string. Deletes cascade and
   cannot be undone: get the user's explicit agreement before calling.
+
+## `netbox_invoke` — schema-confirmed prefix availability
+
+`netbox_invoke` is a closed semantic-action surface, **not** a generic HTTP
+client. Its `operation` and numeric `target` are the only routing inputs; it
+accepts no URL, path, or method. Read the `semantic_actions` metadata returned
+by `netbox_discover` or `netbox_describe` before calling it. An action not
+advertised there is not discovered for that connected instance and must not be
+guessed.
+
+The action IDs currently possible are only these, and only when the connected
+instance reports NetBox **4.6.x** (>=4.6.0, <4.7.0) and its OpenAPI document proves
+the matching JSON request, query, and array-response shape. Unknown or out-of-range
+versions are refused rather than inferred:
+
+```json
+{ "operation": "ipam.prefix.available_ips", "target": 42,
+  "input": { "query": { "brief": true, "fields": "id,address" } } }
+
+{ "operation": "ipam.prefix.allocate_ip", "target": 42,
+  "input": { "data": [{ "prefix_length": 31 }] } }
+```
+
+- `ipam.prefix.available_ips` is a **read** action. Its `input.query` schema is
+  copied from that instance's native GET query parameters. Do not invent a
+  `limit`: the captured 4.6.7 contract does not declare one. Results are an
+  array and are bounded before tool output; narrow with only schema-advertised
+  query parameters when possible.
+- `ipam.prefix.allocate_ip` is a non-destructive **write** action. `input.data`
+  is the native required **array** request body, with **exactly one item** and a
+  **25 KiB UTF-8 serialized JSON** maximum. It is not a bulk allocation surface:
+  use `netbox_write` for deliberate multi-record changes. Its item and response
+  schemas are advertised from the connected OpenAPI contract.
+- An allocation POST is sent exactly once. A conflict or other error is
+  surfaced; it is never automatically retried, because NetBox owns allocation
+  concurrency.
+- No `available-prefixes` action is currently advertised. The captured schema
+  has evidence only for `available-ips`; prefix actions stay withdrawn until a
+  connected schema proves their complete request/query/response contracts.
 
 ## Keeping the round-trips down
 

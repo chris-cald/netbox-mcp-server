@@ -10,7 +10,7 @@
       "name": "netbox-mcp",
       "source": "./",
       "displayName": "NetBox",
-      "description": "NetBox source of truth for your assistant: the five-tool netbox MCP server plus the netbox-modeling skill that drives it.",
+      "description": "NetBox source of truth for your assistant: the six-tool netbox MCP server plus the netbox-modeling skill that drives it.",
       "author": {
         "name": "Zenix Solutions",
         "url": "https://github.com/ZenixSolutions"

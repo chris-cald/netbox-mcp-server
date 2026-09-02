@@ -34,6 +34,7 @@ const EXPECTED_TOOLS = [
   "netbox_describe",
   "netbox_read",
   "netbox_write",
+  "netbox_invoke",
 ];
 
 interface ListedTool {
@@ -59,7 +60,7 @@ beforeAll(async () => {
 });
 
 describe("tools/list input schemas", () => {
-  it("advertises exactly the five layered tools", () => {
+  it("advertises exactly the six layered tools", () => {
     expect(tools.map((t) => t.name).sort()).toEqual([...EXPECTED_TOOLS].sort());
   });
 
@@ -88,7 +89,7 @@ describe("tools/list input schemas", () => {
     // The registry, not the caller, decides the endpoint. This is the property
     // that closes path traversal by construction, and it is worth asserting on
     // the published schema rather than trusting the implementation to stay put.
-    for (const name of ["netbox_read", "netbox_write"]) {
+    for (const name of ["netbox_read", "netbox_write", "netbox_invoke"]) {
       const properties = (tools.find((t) => t.name === name)?.inputSchema["properties"] ??
         {}) as Record<string, unknown>;
       for (const forbidden of ["path", "url", "endpoint", "uri"]) {

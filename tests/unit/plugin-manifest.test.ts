@@ -50,20 +50,6 @@ const authorSchema = z.object({
   url: z.string().optional(),
 });
 
-const stdioServerSchema = z.object({
-  command: z.string().min(1),
-  args: z.array(z.string()),
-  env: z.record(z.string(), z.string()).optional(),
-});
-
-const userConfigFieldSchema = z.object({
-  type: z.enum(["string", "number", "boolean", "directory", "file"]),
-  title: z.string().min(1),
-  description: z.string().min(1),
-  sensitive: z.boolean().optional(),
-  required: z.boolean().optional(),
-});
-
 const pluginManifestSchema = z.object({
   name: z.string().min(1),
   version: z.string().min(1),
@@ -71,8 +57,8 @@ const pluginManifestSchema = z.object({
   license: z.string().min(1),
   author: authorSchema,
   repository: z.string().min(1),
-  userConfig: z.record(z.string(), userConfigFieldSchema),
-  mcpServers: z.record(z.string(), stdioServerSchema),
+  userConfig: z.undefined().optional(),
+  mcpServers: z.undefined().optional(),
 });
 
 const marketplaceEntrySchema = z.object({
@@ -228,82 +214,11 @@ describe("bundled skill", () => {
   });
 });
 
-describe("bundled MCP server", () => {
-  const servers = Object.entries(pluginManifest.mcpServers);
-  const [serverName, server] = required(servers[0], "the first mcpServers entry");
-
-  it("registers exactly one server", () => {
-    expect(servers).toHaveLength(1);
-  });
-
-  it("keeps the name the tools are already namespaced under", () => {
-    expect(serverName).toBe("netbox");
-  });
-
-  it("launches the published package through npx, not a local build", () => {
-    expect(server.command).toBe("npx");
-    expect(server.args).toContain("-y");
-    // A path into this repository would work on the maintainer's machine and
-    // nowhere else.
-    for (const arg of server.args) {
-      expect(arg.includes("dist/"), `${arg} points at a local build`).toBe(false);
-      expect(arg.startsWith("."), `${arg} is a relative path`).toBe(false);
-    }
-    // ${CLAUDE_PLUGIN_ROOT} would be the same mistake spelled portably.
-    expect(JSON.stringify(server)).not.toContain("CLAUDE_PLUGIN_ROOT");
-  });
-
-  it("names the package this repository publishes, pinned to its version", () => {
-    const spec = required(
-      server.args.find((arg) => arg.startsWith("@zenixsolutions/")),
-      "an @zenixsolutions/… package spec in args",
-    );
-
-    // `@scope/name@version` — the last `@` separates the version.
-    const at = spec.lastIndexOf("@");
-    expect(
-      at,
-      `${spec} carries no @version, so the plugin cannot pin it`,
-    ).toBeGreaterThan(0);
-
-    expect(spec.slice(0, at)).toBe(packageJson.name);
-    expect(spec.slice(at + 1)).toBe(packageJson.version);
-  });
-
-  it("supplies both variables the server requires", () => {
-    expect(Object.keys(server.env ?? {}).sort()).toEqual(["NETBOX_TOKEN", "NETBOX_URL"]);
-  });
-
-  it("resolves every ${user_config.*} reference to a declared field", () => {
-    const declared = new Set(Object.keys(pluginManifest.userConfig));
-    const referenced = new Set<string>();
-
-    for (const [, entryServer] of servers) {
-      const values = [...entryServer.args, ...Object.values(entryServer.env ?? {})];
-      for (const value of values) {
-        for (const match of value.matchAll(/\$\{user_config\.([A-Za-z0-9_]+)\}/g)) {
-          referenced.add(required(match[1], "a captured user_config key"));
-        }
-      }
-    }
-
-    expect(referenced.size).toBeGreaterThan(0);
-    for (const key of referenced) {
-      expect(declared.has(key), `\${user_config.${key}} is not declared`).toBe(true);
-    }
-    // The reverse direction: a declared field nothing consumes prompts the
-    // user for a value that is then thrown away.
-    for (const key of declared) {
-      expect(referenced.has(key), `userConfig.${key} is never used`).toBe(true);
-    }
-  });
-
-  it("marks the token as sensitive so it is not written to settings.json", () => {
-    const token = required(
-      pluginManifest.userConfig.netbox_token,
-      "userConfig.netbox_token",
-    );
-    expect(token.sensitive).toBe(true);
-    expect(token.required).toBe(true);
+describe("MCP launcher", () => {
+  it("does not claim a portable GUI launcher with bare npx", () => {
+    // GUI hosts need a machine-specific absolute npx path. A plugin manifest
+    // cannot derive one safely, so it supplies the skill only.
+    expect(pluginManifest.mcpServers).toBeUndefined();
+    expect(pluginManifest.userConfig).toBeUndefined();
   });
 });

@@ -50,8 +50,9 @@ And confirm the tool surface still registers as expected:
 node dist/index.js --list-tools
 ```
 
-That must print exactly five tools — `netbox_global_search`, `netbox_discover`,
-`netbox_describe`, `netbox_read`, `netbox_write` — and needs no credentials. The count is a deliberate design property, not an incidental one: adding a
+That must print exactly six tools — `netbox_global_search`, `netbox_discover`,
+`netbox_describe`, `netbox_read`, `netbox_write`, `netbox_invoke` — and needs no
+credentials. The count is a deliberate design property, not an incidental one: adding a
 seventh tool is an architectural change, not a routine addition. Raise it in an issue first.
 
 ## Adding an object type

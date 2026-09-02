@@ -130,6 +130,8 @@ export interface ListPayload<T> {
   items: T[];
   has_more: boolean;
   next_offset?: number;
+  /** Present when even the first returned item was too large to include. */
+  items_truncated?: boolean;
 }
 
 export function buildListPayload<T>(
@@ -162,10 +164,11 @@ export function enforceCharacterLimit(
 ): { text: string; payload: ListPayload<Record<string, unknown>> } {
   if (text.length <= CHARACTER_LIMIT) return { text, payload };
 
-  // Binary-trim down to a size that fits.
-  let lo = 1;
+  // Binary-trim down to a size that fits. Zero is valid: returning one
+  // oversized item breaks the response budget and conceals the truncation.
+  let lo = 0;
   let hi = payload.items.length;
-  let best = 1;
+  let best = 0;
   while (lo <= hi) {
     const mid = Math.floor((lo + hi) / 2);
     const trial = markdownRenderer(payload.items.slice(0, mid));
@@ -184,11 +187,15 @@ export function enforceCharacterLimit(
     items: truncated,
     has_more: true,
     next_offset: payload.offset + truncated.length,
+    items_truncated: true,
   };
   const message =
     `\n\n---\n_Response truncated from ${payload.items.length} to ${truncated.length} items to fit the character limit. ` +
-    `Call the same tool again with offset=${newPayload.next_offset} to continue, ` +
-    `or add filters to narrow the result set._`;
+    (truncated.length === 0
+      ? "The first item is too large to return; add filters to narrow the response."
+      : `Call the same tool again with offset=${newPayload.next_offset} to continue, ` +
+        "or add filters to narrow the result set.") +
+    "_";
   const newText = markdownRenderer(truncated) + message;
   return { text: newText, payload: newPayload };
 }

@@ -29,6 +29,8 @@ export interface PaginatedResponse<T> {
  * exposes collection-relative methods rather than arbitrary URLs, so injected
  * implementations retain the same endpoint boundary as the default client.
  */
+export type PrefixDetailAction = "available-ips" | "available-prefixes";
+
 export interface NetBoxApi {
   list<T>(
     endpoint: string,
@@ -42,6 +44,18 @@ export interface NetBoxApi {
     body: Record<string, unknown>,
   ): Promise<T>;
   del(endpoint: string, id: number | string): Promise<void>;
+  /**
+   * Invoke one of the two native IPAM prefix availability detail actions.
+   * The action is a closed union, never a caller-supplied path or HTTP method.
+   */
+  prefixDetailAction<T>(
+    endpoint: string,
+    id: number,
+    action: PrefixDetailAction,
+    method: "get" | "post",
+    body?: unknown,
+    params?: Record<string, unknown>,
+  ): Promise<T>;
 }
 
 /** Supplies an API at call time, preserving lazy tool construction. */
@@ -150,6 +164,29 @@ export class NetBoxClient implements NetBoxApi {
         headers: { Authorization: authorization },
       }),
     );
+  }
+
+  /** Native, closed IPAM prefix availability detail actions. */
+  async prefixDetailAction<T>(
+    endpoint: string,
+    id: number,
+    action: PrefixDetailAction,
+    method: "get" | "post",
+    body: unknown = [],
+    params: Record<string, unknown> = {},
+  ): Promise<T> {
+    const path = `/${endpoint}/${id}/${action}/`;
+    const response = await this.request((authorization) =>
+      method === "get"
+        ? this.http.get(path, {
+            params: cleanParams(params),
+            headers: { Authorization: authorization },
+          })
+        : this.http.post(path, body, {
+            headers: { Authorization: authorization },
+          }),
+    );
+    return response.data as T;
   }
 
   /** GET /<path>/ with raw query params. Used for global search. */

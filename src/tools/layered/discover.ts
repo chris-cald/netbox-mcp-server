@@ -11,6 +11,11 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 
+import {
+  applicablePrefixActions,
+  boundedSemanticActionMetadata,
+  type SemanticActionMetadata,
+} from "../../actions/ipam-prefix.js";
 import { CHARACTER_LIMIT } from "../../constants.js";
 import { handleApiError } from "../../errors.js";
 import { buildListPayload } from "../../formatting.js";
@@ -88,10 +93,27 @@ export function registerDiscover(server: McpServer, schema: SchemaProvider): voi
 
         const version = await safeVersion(schema);
         const shown = fitToBudget(types, args);
-        const payload = buildListPayload(shown.map(toRow), types.length, shown.length, 0);
-        return textResult(render(shown, types.length, version, args), {
+        const actions = new Map(
+          await Promise.all(
+            shown.map(
+              async (type) =>
+                [
+                  type.object_type,
+                  await applicablePrefixActions(schema, type.object_type),
+                ] as const,
+            ),
+          ),
+        );
+        const rows = shown.map((type) =>
+          toRow(type, actions.get(type.object_type) ?? []),
+        );
+        const payload = buildListPayload(rows, types.length, shown.length, 0);
+        return textResult(render(shown, types.length, version, args, actions), {
           ...payload,
           netbox_version: version,
+          semantic_actions_metadata_truncated: rows.some(
+            (row) => row.semantic_actions_metadata_truncated === true,
+          ),
         });
       } catch (error) {
         return errorResult(toErrorText(error, handleApiError));
@@ -120,19 +142,29 @@ async function safeVersion(schema: SchemaProvider): Promise<string> {
   }
 }
 
-function toRow(t: ObjectTypeSummary): Record<string, unknown> {
+function toRow(
+  t: ObjectTypeSummary,
+  semanticActions: SemanticActionMetadata[],
+): Record<string, unknown> & { semantic_actions_metadata_truncated: boolean } {
+  const bounded = boundedSemanticActionMetadata(semanticActions);
   return {
     object_type: t.object_type,
     label: t.label,
     endpoint: t.endpoint,
     app: t.app,
     operations: t.operations,
+    semantic_actions: bounded.actions,
+    semantic_actions_metadata_truncated: bounded.truncated,
     summary: t.summary,
   };
 }
 
-function line(t: ObjectTypeSummary): string {
-  return `- \`${t.object_type}\` — ${t.label} [${t.operations.join(",")}] — ${t.summary}`;
+function line(t: ObjectTypeSummary, semanticActions: SemanticActionMetadata[]): string {
+  const actions =
+    semanticActions.length > 0
+      ? ` Semantic actions: ${semanticActions.map((action) => action.name).join(", ")}.`
+      : "";
+  return `- \`${t.object_type}\` — ${t.label} [${t.operations.join(",")}] — ${t.summary}${actions}`;
 }
 
 /**
@@ -159,6 +191,7 @@ function render(
   total: number,
   version: string,
   args: DiscoverArgs,
+  actions: Map<string, SemanticActionMetadata[]> = new Map(),
 ): string {
   const lines = [
     `# NetBox object types (NetBox ${version})`,
@@ -167,7 +200,7 @@ function render(
       ? `${total} type(s) match ${describeFilter(args)}.`
       : `${total} type(s) match ${describeFilter(args)}; showing the first ${shown.length}. Narrow with \`query\` or \`app\` to see the rest.`,
     "",
-    ...shown.map(line),
+    ...shown.map((type) => line(type, actions.get(type.object_type) ?? [])),
     "",
     "Next: call netbox_describe with the object_type you picked and the operation you intend (list, get, create, update or delete).",
   ];

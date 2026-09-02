@@ -9,7 +9,7 @@ Written in TypeScript on the official `@modelcontextprotocol/sdk`. Runs locally 
 stdio as a subprocess of an MCP-aware client (Claude Desktop, Claude Code, Cursor,
 Codex).
 
-**Five tools, not several hundred.** The object types, fields, filters and enum values
+**Six tools, not several hundred.** The object types, fields, filters and enum values
 are not hard-coded — they are derived at runtime from the connected instance's own
 `/api/schema/` document, so the surface describes _your_ NetBox, including its plugins
 and custom fields. A `tools/list` response is about 12,000 characters of descriptions and
@@ -122,7 +122,7 @@ do, at session start; nothing else does.
 
 ---
 
-## The five tools
+## The six tools
 
 | Tool                   | What it does                                                                                                                                  |
 | ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -131,6 +131,7 @@ do, at session start; nothing else does.
 | `netbox_describe`      | Explains one object type: required fields, optional fields with enum values, read-only fields, prerequisites, and the filters `list` accepts. |
 | `netbox_read`          | Reads objects — one by id, or a filtered, paginated list. Never modifies anything.                                                            |
 | `netbox_write`         | Creates, updates or deletes one object.                                                                                                       |
+| `netbox_invoke`        | Runs one schema-confirmed, controlled IPAM prefix availability or allocation action.                                                          |
 
 The intended path for a change is `netbox_discover` → `netbox_describe` → `netbox_write`.
 `netbox_global_search` is the shortcut past that: looking one named object up costs a
@@ -156,6 +157,12 @@ A few behaviours worth knowing:
   Lists page at 50 by default (max 1000) and report `total`, `has_more` and
   `next_offset`; any response over 25,000 characters is truncated with the offset to
   resume from.
+- `netbox_invoke` advertises prefix availability actions only for NetBox **4.6.x**
+  schemas whose complete JSON request/query/response contracts match. Its
+  `allocate_ip` action accepts exactly one object array item and a serialized UTF-8 JSON
+  body no larger than **25 KiB**; use `netbox_write` for deliberate multi-record changes.
+  Its allocation POST is sent once and is **never automatically retried**, so NetBox
+  retains allocation concurrency and conflict semantics.
 
 **Layering costs round-trips.** A trivial read that one `netbox_read` call answers has
 been observed taking four calls, and a name lookup ten. That is measured, not estimated,
@@ -226,8 +233,8 @@ NETBOX_URL=https://netbox.corp.com NETBOX_TOKEN="$NETBOX_TOKEN" netbox-mcp --che
 
 # Does the binary work at all? Needs no credentials and makes no network calls.
 netbox-mcp --list-tools
-# -> netbox_global_search / netbox_discover / netbox_describe / netbox_read / netbox_write
-#    5 tools registered.        (on stderr)
+# -> netbox_global_search / netbox_discover / netbox_describe / netbox_read / netbox_write / netbox_invoke
+#    6 tools registered.        (on stderr)
 
 # Do the credentials work against NetBox itself?
 curl -sS -H "Authorization: Token $NETBOX_TOKEN" \
@@ -331,6 +338,7 @@ src/
   formatting.ts       markdown rendering + pagination payload
   schema/             fetch, cache and interpret the instance's /api/schema/
   schemas/common.ts   shared Zod schemas
+  tools/layered/      the six tools: search, discover, describe, read, write, invoke
 skills/
   netbox-modeling/    agent skill, versioned with the tool contract it names
 scripts/
