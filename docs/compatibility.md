@@ -22,7 +22,6 @@ claimed macOS and Windows while CI ran Linux only.
 | Linux   | ARM64                 | `ubuntu-24.04-arm` | 22        |
 | Windows | x86-64                | `windows-latest`   | 22        |
 | macOS   | ARM64 (Apple silicon) | `macos-14`         | 22        |
-| macOS   | x86-64 (Intel)        | `macos-13`         | 22        |
 
 Each runs typecheck, lint, format, build, the full test suite, and a smoke test
 of the built binary's CLI contract — `--version`, `--help`, `--list-tools`

@@ -31,9 +31,11 @@ import type {
   ObjectTypeSummary,
   SchemaProvider,
 } from "../../schema/types.js";
+import type { ApiErrorSanitizer } from "./shared.js";
 import {
   clampText,
   errorResult,
+  requireApiErrorSanitizer,
   requireOperation,
   resolveType,
   suggestNames,
@@ -150,7 +152,9 @@ export function registerRead(
   server: McpServer,
   schema: SchemaProvider,
   api: NetBoxApiProvider = getClient,
+  sanitizeApiError?: ApiErrorSanitizer,
 ): void {
+  const errorSanitizer = requireApiErrorSanitizer(api, sanitizeApiError);
   server.registerTool(
     "netbox_read",
     {
@@ -170,9 +174,9 @@ export function registerRead(
         requireOperation(summary, args.operation);
         return args.operation === "get"
           ? await runGet(summary, args, api)
-          : await runList(summary, args, schema, api);
+          : await runList(summary, args, schema, api, errorSanitizer);
       } catch (error) {
-        return errorResult(toErrorText(error));
+        return errorResult(toErrorText(error, errorSanitizer));
       }
     },
   );
@@ -316,6 +320,7 @@ async function runList(
   args: ReadArgs,
   schema: SchemaProvider,
   api: NetBoxApiProvider,
+  sanitizeApiError: ApiErrorSanitizer,
 ): Promise<CallToolResult> {
   const filters = args.filters ?? {};
   const names = Object.keys(filters);
@@ -345,7 +350,7 @@ async function runList(
     });
   } catch (error) {
     return errorResult(
-      `${toErrorText(error)}\nIf a filter name is the problem, call netbox_describe with ` +
+      `${toErrorText(error, sanitizeApiError)}\nIf a filter name is the problem, call netbox_describe with ` +
         `object_type="${summary.object_type}" and operation="list" for the accepted filters.`,
     );
   }

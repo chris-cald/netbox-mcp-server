@@ -26,9 +26,11 @@ import type {
   ObjectTypeSummary,
   SchemaProvider,
 } from "../../schema/types.js";
+import type { ApiErrorSanitizer } from "./shared.js";
 import {
   clampText,
   errorResult,
+  requireApiErrorSanitizer,
   renderDescribe,
   requireOperation,
   resolveType,
@@ -90,7 +92,9 @@ export function registerWrite(
   server: McpServer,
   schema: SchemaProvider,
   api: NetBoxApiProvider = getClient,
+  sanitizeApiError?: ApiErrorSanitizer,
 ): void {
+  const errorSanitizer = requireApiErrorSanitizer(api, sanitizeApiError);
   server.registerTool(
     "netbox_write",
     {
@@ -114,7 +118,7 @@ export function registerWrite(
         }
         return await runWrite(schema, summary, args.operation, args.id, args.data, api);
       } catch (error) {
-        return errorResult(toErrorText(error));
+        return errorResult(toErrorText(error, errorSanitizer));
       }
     },
   );

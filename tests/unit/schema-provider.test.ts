@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import type { NetBoxConfig } from "../../src/config.js";
+import { createCredentialProvider } from "../../src/credentials.js";
 import type { HttpGet } from "../../src/schema/loader.js";
 import type { OpenApiDocument } from "../../src/schema/openapi.js";
 import {
@@ -31,7 +32,7 @@ const provider: SchemaProvider = createSchemaProviderFromDocument(fixture);
 const config: NetBoxConfig = {
   baseUrl: "https://netbox.example.com",
   apiUrl: "https://netbox.example.com/api",
-  token: "s3cr3t-token",
+  credentials: createCredentialProvider({ inlineToken: "s3cr3t-token" }),
   insecure: false,
 };
 

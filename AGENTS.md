@@ -41,16 +41,16 @@ It is not a hosted service, there is no login page, and nothing is deployed anyw
 
 Facts you may need:
 
-| Property           | Value                                                       |
-| ------------------ | ----------------------------------------------------------- |
-| Version documented | `0.2.0`                                                     |
-| Language / runtime | TypeScript compiled to ESM JavaScript, Node.js **>= 20.11** |
-| npm package        | `@zenixsolutions/netbox-mcp`, binary name `netbox-mcp`      |
-| Normal install     | `npx -y @zenixsolutions/netbox-mcp` — no clone, no build    |
-| Transport          | stdio only                                                  |
-| Required env vars  | `NETBOX_URL`, `NETBOX_TOKEN`                                |
-| Optional env vars  | `NETBOX_INSECURE` — **and nothing else**                    |
-| Tools registered   | **5**, always — see below                                   |
+| Property            | Value                                                                   |
+| ------------------- | ----------------------------------------------------------------------- |
+| Version documented  | `0.2.0`                                                                 |
+| Language / runtime  | TypeScript compiled to ESM JavaScript, Node.js **>= 20.11**             |
+| npm package         | `@zenixsolutions/netbox-mcp`, binary name `netbox-mcp`                  |
+| Normal install      | `npx -y @zenixsolutions/netbox-mcp` — no clone, no build                |
+| Transport           | stdio only                                                              |
+| Credential env vars | `NETBOX_URL`, plus exactly one of `NETBOX_TOKEN` or `NETBOX_TOKEN_FILE` |
+| Optional env vars   | `NETBOX_INSECURE` — **and nothing else**                                |
+| Tools registered    | **6**, always — see below                                               |
 
 ### The five tools
 
@@ -62,7 +62,7 @@ The server registers exactly five tools, on every install, regardless of configu
 | `netbox_discover`      | 1     | Lists the object types this instance supports, and the operations each allows.                                             |
 | `netbox_describe`      | 2     | Explains one object type: required fields, optional fields, read-only fields, accepted filters, and what must exist first. |
 | `netbox_read`          | 3     | `list` (filtered, paginated) or `get` (one object by id). Never modifies anything.                                         |
-| `netbox_write`         | 3     | `create`, `update` or `delete`. The only tool that changes NetBox.                                                         |
+| `netbox_write`         | 3     | `create`, `update` or `delete`. Changes NetBox records.                                                                    |
 
 **The object types those tools address are not fixed.** They are derived at runtime from
 the connected instance's own `/api/schema/` document, so which types exist depends on
@@ -399,14 +399,18 @@ Usage:
   netbox-mcp --version      Print the version and exit.
   netbox-mcp --help         Print this message and exit.
 
-Required environment variables:
-  NETBOX_URL    Base URL of the NetBox instance, e.g. https://netbox.example.com
-  NETBOX_TOKEN  NetBox API token (Admin > API Tokens)
+Required environment variables and credential source:
+  NETBOX_URL         Base URL of the NetBox instance, e.g. https://netbox.example.com
+  NETBOX_TOKEN       Inline NetBox API token (set exactly one token source)
+  NETBOX_TOKEN_FILE  Readable regular file containing the token (set exactly one token source)
 
 Optional environment variables:
   NETBOX_INSECURE     Set to 1/true/yes to disable TLS certificate verification.
                       This exposes the token to anyone able to intercept the
                       connection. Prefer installing your internal root CA.
+
+NETBOX_TOKEN_FILE is read before every NetBox request so token rotation takes
+effect without restart. File paths and token values are never reported.
 
 Write access is controlled by the NetBox token, not by this server. Create
 the token with 'write enabled' unchecked, and constrain its object
@@ -444,7 +448,7 @@ All four outcomes below were produced by running the command:
 
   Note that `https://x.invalid` does not resolve and the token is nonsense, and `--check`
   still passed. **`--check` does not contact NetBox and does not validate the token.** It
-  checks that the two variables are present and that the URL parses. Section 7.3 is what
+  checks that `NETBOX_URL` and exactly one credential source are present, that a token file is readable and non-empty when used, and that the URL parses. Section 7.3 is what
   proves the credentials work.
 
 - **Exit 78**, with `NETBOX_URL` unset:
@@ -453,21 +457,29 @@ All four outcomes below were produced by running the command:
   Missing required environment variable NETBOX_URL. Set it to the base URL of your NetBox instance, e.g. https://netbox.example.com
   ```
 
-- **Exit 78**, with `NETBOX_TOKEN` unset:
+- **Exit 78**, with both token sources unset:
 
   ```
-  Missing required environment variable NETBOX_TOKEN. Create a token in NetBox under "Admin > API Tokens".
+  Missing NetBox credential. Set exactly one of NETBOX_TOKEN or NETBOX_TOKEN_FILE.
   ```
+
+- **Exit 78**, with both token sources set:
+
+  ```
+  NETBOX_TOKEN and NETBOX_TOKEN_FILE are mutually exclusive. Set exactly one.
+  ```
+
+- **Exit 78**, with an unreadable, non-file, or empty `NETBOX_TOKEN_FILE`: the error names `NETBOX_TOKEN_FILE` and the condition without printing its path or contents.
 
 - **Exit 78**, with `NETBOX_URL=notaurl`:
 
   ```
-  NETBOX_URL is not a valid URL: "notaurl". Expected something like https://netbox.example.com
+  NETBOX_URL is not a valid URL. Expected a base URL like https://netbox.example.com without userinfo, a query, or a fragment.
   ```
 
   Fix the value; it must look like `https://netbox.theircompany.com`.
 
-All three failure messages go to **stderr**; the `ok:` line goes to stdout.
+All configuration failure messages go to **stderr**; the `ok:` line goes to stdout.
 
 With `NETBOX_INSECURE=1` also set, `--check` still exits 0 and additionally prints to
 stderr:
@@ -493,9 +505,9 @@ netbox_write
 
 on stdout, plus `5 tools registered.` on stderr, exit 0.
 
-**The count is always 5.** It does not vary with the environment, the NetBox version, or
+**The count is always 6.** It does not vary with the environment, the NetBox version, or
 the plugins installed — the five tools are registered statically, and the instance schema
-is only consulted when a tool is _called_. If you ever see a number other than 5, you are
+is only consulted when a tool is _called_. If you ever see a number other than 6, you are
 not running `0.2.0`.
 
 ### 5.4 Running the server directly
@@ -520,13 +532,9 @@ recreate it, and do not repeat any claim of that shape.
 - Use the absolute path to `npx` — or to `node`, on the clone path (see 6.0 below).
 - On the clone path, use the **absolute** path to `dist/index.js` too. Tildes (`~`) are
   **not** expanded by MCP clients.
-- **Set only `NETBOX_URL`, `NETBOX_TOKEN`, and — if section 3.5 found an internal CA —
-  `NETBOX_INSECURE`.** Anything else in the `env` block is ignored by the server. In
-  particular, do not write `NETBOX_READONLY` or `NETBOX_TOOL_GROUPS`: they do nothing,
-  and their presence misleads the next person who reads the file into thinking writes are
-  restricted.
+- **Set `NETBOX_URL` and exactly one of `NETBOX_TOKEN` or `NETBOX_TOKEN_FILE`, plus — if section 3.5 found an internal CA — `NETBOX_INSECURE`.** The file source must be a readable regular file and is read before every request, so rotation takes effect without restart. Anything else in the `env` block is ignored by the server. In particular, do not write `NETBOX_READONLY` or `NETBOX_TOOL_GROUPS`: they do nothing, and their presence misleads the next person who reads the file into thinking writes are restricted.
 - **Never write the token into a shell profile**, a script, or any file other than this
-  config.
+  config or a dedicated token file. Never write the token-file contents into the client config.
 - **This is a MERGE, not an overwrite.** The user almost certainly has other MCP servers
   configured. Read the existing file, add one key, write it back. Never write one of the
   templates below verbatim over an existing file — you would silently delete every other
@@ -716,7 +724,7 @@ process on the machine.
 npx -y @zenixsolutions/netbox-mcp --list-tools
 ```
 
-**Expect exactly the five names from section 5.3, and `5 tools registered.` on stderr.**
+**Expect exactly the six names from section 5.3, and `5 tools registered.` on stderr.**
 From a clone, run `node dist/index.js --list-tools` in the repository directory instead.
 
 - **A count other than 5:** you are running a different version than this file documents.
@@ -925,16 +933,19 @@ apart from those config paths; the commands in sections 4, 5, 7 and 8 are identi
 ## 11. Environment variable reference
 
 This is the complete list. `--help` (section 5.1) is the authoritative source, and it
-names these three and no others.
+names these four and no others.
 
-| Variable          | Required | Default | Meaning                                                                                                                     |
-| ----------------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `NETBOX_URL`      | **yes**  | —       | Base URL, no `/api` suffix. A trailing `/` or `/api` is stripped automatically. Must parse as a URL, or `--check` exits 78. |
-| `NETBOX_TOKEN`    | **yes**  | —       | NetBox API token. Its permissions are the only thing that limits what the assistant can do.                                 |
-| `NETBOX_INSECURE` | no       | off     | Disables TLS certificate verification for every call to NetBox, including the token-bearing ones. See the warning below.    |
+| Variable            | Required | Default | Meaning                                                                                                                     |
+| ------------------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `NETBOX_URL`        | **yes**  | —       | Base URL, no `/api` suffix. A trailing `/` or `/api` is stripped automatically. Must parse as a URL, or `--check` exits 78. |
+| `NETBOX_TOKEN`      | one of   | —       | Inline NetBox API token. Its permissions are the only thing that limits what the assistant can do.                          |
+| `NETBOX_TOKEN_FILE` | one of   | —       | A readable regular file containing the token. It is mutually exclusive with `NETBOX_TOKEN` and read before every request.   |
+| `NETBOX_INSECURE`   | no       | off     | Disables TLS certificate verification for every call to NetBox, including the token-bearing ones. See the warning below.    |
 
 Boolean variables are true for `1`, `true`, `yes`, `y`, or `on` (case-insensitive, after
 trimming whitespace). Every other value, including an empty string, is false.
+
+`NETBOX_TOKEN_FILE` is for a server-side secret mount, not a tool argument or result. Its path and contents are never reported. Missing, unreadable, non-file, and empty token files fail closed; normal line-ending whitespace is trimmed. The file is read on each NetBox request, so a secret-manager rotation is used without restart.
 
 ⚠️ **`NETBOX_INSECURE=1` turns off certificate verification entirely.** Anyone able to
 intercept the connection can present their own certificate and read the API token. Use it

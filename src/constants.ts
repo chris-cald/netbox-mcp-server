@@ -20,8 +20,11 @@ export const DEFAULT_TIMEOUT_MS = 30000;
 /** Required environment variable: full base URL of the NetBox instance, e.g. `https://netbox.example.com`. */
 export const ENV_NETBOX_URL = "NETBOX_URL";
 
-/** Required environment variable: NetBox API token. */
+/** Inline NetBox API token credential source. */
 export const ENV_NETBOX_TOKEN = "NETBOX_TOKEN";
+
+/** Path to a regular file containing the NetBox API token credential source. */
+export const ENV_NETBOX_TOKEN_FILE = "NETBOX_TOKEN_FILE";
 
 /**
  * Optional environment variable: "1" / "true" / "yes" to allow self-signed TLS
