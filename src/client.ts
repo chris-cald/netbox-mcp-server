@@ -1,8 +1,10 @@
 /**
  * Thin Axios-based NetBox REST client.
  *
- * All tools go through the singleton returned by `getClient()`, which reads
- * config from env at first use and applies the auth header + TLS options.
+ * Server-built tools use clients created by `createNetBoxClient()` and cached
+ * lazily per server instance. Direct tool registration retains legacy
+ * process-global `getClient()` as its default. Clients apply auth headers and
+ * TLS options from their configuration.
  */
 
 import axios, { AxiosError, AxiosInstance } from "axios";
@@ -20,7 +22,26 @@ export interface PaginatedResponse<T> {
   results: T[];
 }
 
-export class NetBoxClient {
+/** The narrow NetBox REST operations the tool layer may use. */
+export interface NetBoxApi {
+  list<T>(
+    endpoint: string,
+    params?: Record<string, unknown>,
+  ): Promise<PaginatedResponse<T>>;
+  get<T>(endpoint: string, id: number | string): Promise<T>;
+  create<T>(endpoint: string, body: Record<string, unknown>): Promise<T>;
+  update<T>(
+    endpoint: string,
+    id: number | string,
+    body: Record<string, unknown>,
+  ): Promise<T>;
+  del(endpoint: string, id: number | string): Promise<void>;
+}
+
+/** Supplies an API at call time, preserving lazy tool construction. */
+export type NetBoxApiProvider = () => NetBoxApi;
+
+export class NetBoxClient implements NetBoxApi {
   readonly config: NetBoxConfig;
   private readonly http: AxiosInstance;
 
@@ -189,7 +210,16 @@ function axiosLikeError(response: { status: number; data: unknown }): Error {
   return err;
 }
 
-/** Lazily instantiate the singleton client. */
+/** Build an isolated client for one server instance or test. */
+export function createNetBoxClient(config: NetBoxConfig): NetBoxApi {
+  return new NetBoxClient(config);
+}
+
+/**
+ * Legacy process-global adapter for direct tool registration and existing
+ * consumers. Server construction uses `createNetBoxClient` instead, so hosted
+ * transports can supply isolated credentials without sharing this cache.
+ */
 export function getClient(): NetBoxClient {
   if (!cachedClient) {
     cachedClient = new NetBoxClient(loadConfig());
