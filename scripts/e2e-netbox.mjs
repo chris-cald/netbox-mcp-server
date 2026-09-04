@@ -274,24 +274,93 @@ export async function waitForReady(url, token, log) {
   );
 }
 
-async function seedPrefix(url, token, log) {
-  const response = await request(url, token, "/api/ipam/prefixes/", {
+async function created(url, token, path, body) {
+  const response = await request(url, token, path, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      prefix: "198.51.100.0/29",
-      status: "active",
-      description: "Disposable MCP available-IPs E2E fixture",
-    }),
+    body: JSON.stringify(body),
   });
-  const prefix = await response.json();
-  if (!prefix || typeof prefix !== "object" || !Number.isInteger(prefix.id)) {
-    throw new Error("NetBox created the fixture prefix without a numeric id.");
+  const value = await response.json();
+  if (!value || typeof value !== "object" || !Number.isInteger(value.id)) {
+    throw new Error(`NetBox created ${path} without a numeric id.`);
   }
-  await log.write(
-    `Seeded deterministic fixture prefix 198.51.100.0/29 (id ${prefix.id}).\n`,
-  );
+  return value;
+}
+
+async function seedPrefix(url, token, namespace, log) {
+  const prefix = await created(url, token, "/api/ipam/prefixes/", {
+    prefix: "198.51.100.0/29",
+    status: "active",
+    description: `Disposable MCP E2E fixture ${namespace}`,
+  });
+  await log.write(`Seeded fixture prefix 198.51.100.0/29 (id ${prefix.id}).\n`);
   return prefix;
+}
+
+/** Seed one cable path: interface → front port → mapped rear port → interface. */
+async function seedCableTopology(url, token, namespace, log) {
+  const site = await created(url, token, "/api/dcim/sites/", {
+    name: `${namespace} Site`,
+    slug: `${namespace}-site`,
+  });
+  const manufacturer = await created(url, token, "/api/dcim/manufacturers/", {
+    name: `${namespace} Manufacturer`,
+    slug: `${namespace}-manufacturer`,
+  });
+  const role = await created(url, token, "/api/dcim/device-roles/", {
+    name: `${namespace} Role`,
+    slug: `${namespace}-role`,
+  });
+  const deviceType = await created(url, token, "/api/dcim/device-types/", {
+    manufacturer: manufacturer.id,
+    model: `${namespace} Type`,
+    slug: `${namespace}-type`,
+  });
+  const createDevice = (name) =>
+    created(url, token, "/api/dcim/devices/", {
+      name: `${namespace} ${name}`,
+      device_type: deviceType.id,
+      role: role.id,
+      site: site.id,
+    });
+  const sourceDevice = await createDevice("Source");
+  const panelDevice = await createDevice("Panel");
+  const destinationDevice = await createDevice("Destination");
+  const sourceInterface = await created(url, token, "/api/dcim/interfaces/", {
+    device: sourceDevice.id,
+    name: "uplink",
+    type: "1000base-t",
+  });
+  const destinationInterface = await created(url, token, "/api/dcim/interfaces/", {
+    device: destinationDevice.id,
+    name: "uplink",
+    type: "1000base-t",
+  });
+  const rearPort = await created(url, token, "/api/dcim/rear-ports/", {
+    device: panelDevice.id,
+    name: "rear-1",
+    type: "8p8c",
+    positions: 1,
+  });
+  const frontPort = await created(url, token, "/api/dcim/front-ports/", {
+    device: panelDevice.id,
+    name: "front-1",
+    type: "8p8c",
+    positions: 1,
+    rear_ports: [{ position: 1, rear_port: rearPort.id }],
+  });
+  await created(url, token, "/api/dcim/cables/", {
+    a_terminations: [{ object_type: "dcim.interface", object_id: sourceInterface.id }],
+    b_terminations: [{ object_type: "dcim.frontport", object_id: frontPort.id }],
+  });
+  await created(url, token, "/api/dcim/cables/", {
+    a_terminations: [{ object_type: "dcim.rearport", object_id: rearPort.id }],
+    b_terminations: [
+      { object_type: "dcim.interface", object_id: destinationInterface.id },
+    ],
+  });
+  await log.write(`Seeded cable trace topology ${namespace}.\n`);
+  return { sourceInterface, frontPort, rearPort };
 }
 
 async function composeLogs(compose, project, env, log) {
@@ -374,9 +443,10 @@ function createFixtureLifecycle() {
 }
 
 /**
- * Starts a clean fixture, waits for authenticated readiness, and seeds exactly
- * one deterministic /29. The callback and all startup failures are cleaned up
- * in finally; generated credentials are never returned or logged.
+ * Starts a clean fixture, waits for authenticated readiness, and seeds an
+ * isolated /29 plus one mapped cable topology. The callback and all startup
+ * failures are cleaned up in finally; generated credentials are never returned
+ * or logged.
  */
 export async function withNetBoxFixture(callback, options = {}) {
   const suppliedEnv = options.env ?? process.env;
@@ -397,6 +467,7 @@ export async function withNetBoxFixture(callback, options = {}) {
   const secrets = Object.values(credentials);
   const port = await freeLoopbackPort();
   const project = projectName();
+  const namespace = `mcp-e2e-${randomBytes(6).toString("hex")}`;
   const env = {
     ...suppliedEnv,
     NETBOX_E2E_IMAGE: patchedImage,
@@ -439,12 +510,15 @@ export async function withNetBoxFixture(callback, options = {}) {
     lifecycle.assertRunning();
     await waitForReady(url, credentials.token, log);
     lifecycle.assertRunning();
-    const prefix = await seedPrefix(url, credentials.token, log);
+    const prefix = await seedPrefix(url, credentials.token, namespace, log);
+    lifecycle.assertRunning();
+    const topology = await seedCableTopology(url, credentials.token, namespace, log);
     lifecycle.assertRunning();
     callbackResult = await callback({
       url,
       token: credentials.token,
       prefix,
+      topology,
       logPath: log.path,
     });
   } catch (error) {

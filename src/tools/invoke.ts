@@ -6,14 +6,14 @@ import { z } from "zod";
 
 import {
   InvokeInput,
-  applicablePrefixAction,
-  prefixAction,
-  prefixActionVersionError,
+  applicableSemanticAction,
+  semanticAction,
+  semanticActionVersionError,
   requestForAction,
-  supportsPrefixActionVersion,
+  supportsSemanticActionVersion,
   validateActionResponse,
-  type PrefixActionName,
-} from "../actions/ipam-prefix.js";
+  type SemanticActionName,
+} from "../actions/semantic.js";
 import type { NetBoxApiProvider } from "../client.js";
 import { CHARACTER_LIMIT } from "../constants.js";
 import type { SchemaProvider } from "../schema/types.js";
@@ -29,9 +29,9 @@ import {
 const MAX_ACTION_ITEMS = 50;
 const MAX_INVOKE_ERROR_CHARS = 1_000;
 
-const DESCRIPTION = `Runs one controlled semantic NetBox action. This is not a generic HTTP client: operation is a closed allowlist and target is always a numeric ipam.prefix id. Do not supply a path, URL, or method.
+const DESCRIPTION = `Runs one controlled semantic NetBox action. This is not a generic HTTP client: operation is a closed allowlist and target is always a positive numeric object id. Do not supply a path, URL, method, query, or renderer.
 
-Available operations are advertised by netbox_discover and netbox_describe only when the connected instance reports NetBox 4.6.x and its OpenAPI schema confirms their exact native request, query, and response shapes. Unknown or out-of-range versions are refused. This server currently has no available-prefixes action because its captured schema fixture provides no evidence for that contract.
+Available operations are advertised by netbox_discover and netbox_describe only when the connected instance reports NetBox 4.6.x and its OpenAPI schema confirms their exact native request, query, and response shapes. Unknown or out-of-range versions are refused. Cable traces are native GETs with no caller-controlled input; the server never traverses or renders a graph locally.
 
 Availability is always obtained from NetBox. Allocation accepts exactly one native array item with a 25 KiB UTF-8 JSON body limit, POSTs the endpoint once, and is never automatically retried, preserving NetBox's allocation concurrency behavior.`;
 
@@ -62,7 +62,7 @@ function parseInvokeInput(args: unknown): z.infer<typeof InvokeInput> {
     );
   }
   if (field === "target") {
-    throw new Error("Invalid target. Supply a positive numeric ipam.prefix id.");
+    throw new Error("Invalid target. Supply a positive numeric target id.");
   }
   throw new Error(
     "Invalid invoke arguments. Supply a supported operation, positive numeric target, and an object input.",
@@ -84,22 +84,17 @@ function serializedLength(value: unknown): number {
  * be very large on an instance with extensive custom-field definitions.
  */
 function boundedActionResult(
-  result: unknown,
+  result: unknown[],
   action: Record<string, unknown>,
   operation: string,
   target: number,
   classification: Record<string, unknown>,
+  resultKind?: "interface-trace" | "port-paths",
 ): {
   payload: Record<string, unknown>;
   truncated: boolean;
   metadataTruncated: boolean;
 } {
-  if (!Array.isArray(result)) {
-    throw new Error(
-      "NetBox returned a response that does not match the schema-confirmed array result.",
-    );
-  }
-
   let actionMetadata: Record<string, unknown> = action;
   let metadataTruncated = false;
   const makePayload = (
@@ -111,7 +106,11 @@ function boundedActionResult(
     classification,
     action: actionMetadata,
     ...(metadataTruncated ? { action_metadata_truncated: true } : {}),
-    result: items,
+    result: resultKind
+      ? resultKind === "interface-trace"
+        ? { kind: resultKind, path: items }
+        : { kind: resultKind, paths: items }
+      : items,
     result_truncated: truncated,
   });
 
@@ -165,17 +164,17 @@ export function registerInvoke(
     async (args): Promise<CallToolResult> => {
       try {
         const parsed = parseInvokeInput(args);
-        const definition = prefixAction(parsed.operation);
+        const definition = semanticAction(parsed.operation);
         if (!definition)
           throw new Error(`Unknown controlled operation "${parsed.operation}".`);
 
         // An action is executable only when its full OpenAPI contract is
         // compatible. A method/path match alone is deliberately insufficient.
         const version = await schema.version();
-        if (!supportsPrefixActionVersion(version)) {
-          throw new Error(prefixActionVersionError(version));
+        if (!supportsSemanticActionVersion(version)) {
+          throw new Error(semanticActionVersionError(version));
         }
-        const action = await applicablePrefixAction(schema, definition, version);
+        const action = await applicableSemanticAction(schema, definition, version);
         if (!action) {
           throw new Error(
             `Operation "${definition.name}" is not available on this NetBox instance. ` +
@@ -187,12 +186,12 @@ export function registerInvoke(
         const summary = await schema.resolve(action.definition.target_resource_type);
         if (!summary)
           throw new Error(
-            "The ipam.prefix object type is not available on this instance.",
+            `The ${action.definition.target_resource_type} object type is not available on this instance.`,
           );
         const endpoint = assertSafeEndpoint(summary.endpoint);
-        // Allocation is intentionally a single native POST. There is no retry
-        // wrapper here: NetBox owns availability and conflict semantics.
-        const nativeResult = await api().prefixDetailAction(
+        // Native actions are dispatched once. Allocation and NetBox trace
+        // semantics remain owned by NetBox; this server never retries or traverses.
+        const nativeResult = await api().detailAction(
           endpoint,
           parsed.target,
           action.definition.native.action,
@@ -206,9 +205,12 @@ export function registerInvoke(
           action.definition.name,
           parsed.target,
           action.definition.classification,
+          action.definition.result === "native-array"
+            ? undefined
+            : action.definition.result,
         );
         return textResult(
-          `${action.definition.classification.access === "read" ? "Read" : "Allocated via"} ${action.definition.name} for ipam.prefix ${parsed.target}.${bounded.truncated ? " Returned a bounded native response." : ""}${bounded.metadataTruncated ? " Action metadata was compacted to fit the response limit." : ""}`,
+          `${action.definition.classification.access === "read" ? "Read" : "Allocated via"} ${action.definition.name} for ${action.definition.target_resource_type} ${parsed.target}.${bounded.truncated ? " Returned a bounded native response." : ""}${bounded.metadataTruncated ? " Action metadata was compacted to fit the response limit." : ""}`,
           bounded.payload,
         );
       } catch (error) {
@@ -218,4 +220,4 @@ export function registerInvoke(
   );
 }
 
-export type { PrefixActionName };
+export type { SemanticActionName };

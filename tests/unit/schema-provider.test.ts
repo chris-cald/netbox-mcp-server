@@ -41,6 +41,9 @@ describe("listObjectTypes", () => {
     const types = await provider.listObjectTypes();
     expect(types.map((type) => type.object_type)).toEqual([
       "dcim.device",
+      "dcim.frontport",
+      "dcim.interface",
+      "dcim.rearport",
       "dcim.site",
       "ipam.ipaddress",
       "ipam.prefix",
@@ -140,7 +143,7 @@ describe("laziness", () => {
     expect(calls).toHaveLength(0);
 
     const types = await lazy.listObjectTypes();
-    expect(types).toHaveLength(5);
+    expect(types).toHaveLength(8);
     expect(calls.filter((url) => url.includes("/schema/"))).toHaveLength(1);
 
     // A second question costs nothing.

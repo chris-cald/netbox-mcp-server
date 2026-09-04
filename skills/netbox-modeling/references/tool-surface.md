@@ -158,7 +158,7 @@ Practical points:
   current value — that error tells you the `display` string. Deletes cascade and
   cannot be undone: get the user's explicit agreement before calling.
 
-## `netbox_invoke` — schema-confirmed prefix availability
+## `netbox_invoke` — schema-confirmed semantic actions
 
 `netbox_invoke` is a closed semantic-action surface, **not** a generic HTTP
 client. Its `operation` and numeric `target` are the only routing inputs; it
@@ -169,8 +169,8 @@ guessed.
 
 The action IDs currently possible are only these, and only when the connected
 instance reports NetBox **4.6.x** (>=4.6.0, <4.7.0) and its OpenAPI document proves
-the matching JSON request, query, and array-response shape. Unknown or out-of-range
-versions are refused rather than inferred:
+the matching native contract. Unknown or out-of-range versions are refused rather
+than inferred:
 
 ```json
 { "operation": "ipam.prefix.available_ips", "target": 42,
@@ -178,6 +178,12 @@ versions are refused rather than inferred:
 
 { "operation": "ipam.prefix.allocate_ip", "target": 42,
   "input": { "data": [{ "prefix_length": 31 }] } }
+
+{ "operation": "dcim.interface.trace", "target": 42, "input": {} }
+
+{ "operation": "dcim.front_port.paths", "target": 42, "input": {} }
+
+{ "operation": "dcim.rear_port.paths", "target": 42, "input": {} }
 ```
 
 - `ipam.prefix.available_ips` is a **read** action. Its `input.query` schema is
@@ -193,9 +199,12 @@ versions are refused rather than inferred:
 - An allocation POST is sent exactly once. A conflict or other error is
   surfaced; it is never automatically retried, because NetBox owns allocation
   concurrency.
-- No `available-prefixes` action is currently advertised. The captured schema
-  has evidence only for `available-ips`; prefix actions stay withdrawn until a
-  connected schema proves their complete request/query/response contracts.
+- `dcim.interface.trace`, `dcim.front_port.paths`, and `dcim.rear_port.paths`
+  are **read** actions with an empty `input` object. They preserve NetBox's
+  native trace/path JSON; this server does not traverse or render a cable graph.
+- No `available-prefixes`, console, power, or circuit action is currently
+  advertised. Each remains unavailable until a connected schema proves its
+  complete contract and explicit version support is added.
 
 ## Keeping the round-trips down
 

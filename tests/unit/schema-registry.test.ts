@@ -251,9 +251,12 @@ describe("the object-type key prefers a resolved component over the slug", () =>
     ]).toEqual(["plugins.inventory.permission"]);
   });
 
-  it("derives the same keys as before for every type in the fixture", () => {
+  it("derives every object-type key represented by the fixture", () => {
     expect([...registry.types.keys()].sort()).toEqual([
       "dcim.device",
+      "dcim.frontport",
+      "dcim.interface",
+      "dcim.rearport",
       "dcim.site",
       "ipam.ipaddress",
       "ipam.prefix",
@@ -283,9 +286,12 @@ describe("the object-type rule", () => {
     expect(withGetOnly.types.size).toBe(0);
   });
 
-  it("derives the fixture's five object types and excludes its four traps", () => {
+  it("derives the fixture's eight object types and excludes its four traps", () => {
     expect([...registry.types.keys()].sort()).toEqual([
       "dcim.device",
+      "dcim.frontport",
+      "dcim.interface",
+      "dcim.rearport",
       "dcim.site",
       "ipam.ipaddress",
       "ipam.prefix",
@@ -388,7 +394,7 @@ describe("diagnostics", () => {
   it("reports a self-audit that would surface a silent derivation failure", () => {
     const text = formatDiagnostics(registry.diagnostics);
     expect(text).toContain("NetBox 4.6.7");
-    expect(text).toContain("5 object types");
+    expect(text).toContain("8 object types");
     expect(registry.diagnostics.writeSchemasResolvedByName).toBe(0);
     expect(registry.diagnostics.typesWithoutWriteSchema).toEqual([]);
     expect(registry.diagnostics.typesWithoutPatchSchema).toEqual([]);

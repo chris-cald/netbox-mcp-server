@@ -18,7 +18,7 @@ change this captured fixture.
 | OpenAPI version     | 3.0.3                                                                                                                                                           |
 | Generator           | drf-spectacular 0.30.0 (see upstream `requirements.txt`)                                                                                                        |
 | Full document stats | 308 paths, 1043 component schemas                                                                                                                               |
-| This subset         | 18 paths, 91 component schemas, ~445 KB                                                                                                                         |
+| This subset         | 27 paths, 138 component schemas, ~603 KB                                                                                                                        |
 
 Upstream regenerates and commits this document itself; `scripts/verify-openapi.sh` in the
 NetBox repo diffs `python netbox/manage.py spectacular --format openapi-json` against
@@ -35,20 +35,24 @@ request/response components:
 
 - `dcim.device` — `/api/dcim/devices/`, `/api/dcim/devices/{id}/`
 - `dcim.site` — `/api/dcim/sites/`, `/api/dcim/sites/{id}/`
+- `dcim.interface` — `/api/dcim/interfaces/`, `/api/dcim/interfaces/{id}/`, `/api/dcim/interfaces/{id}/trace/`
+- `dcim.frontport` — `/api/dcim/front-ports/`, `/api/dcim/front-ports/{id}/`, `/api/dcim/front-ports/{id}/paths/`
+- `dcim.rearport` — `/api/dcim/rear-ports/`, `/api/dcim/rear-ports/{id}/`, `/api/dcim/rear-ports/{id}/paths/`
 - `ipam.prefix` — `/api/ipam/prefixes/`, `/api/ipam/prefixes/{id}/`
 - `ipam.ipaddress` — `/api/ipam/ip-addresses/`, `/api/ipam/ip-addresses/{id}/`
 
 Deliberately-included exception cases, each of which breaks a naive derivation rule:
 
-| Path                                       | Why it is here                                                                                                                                          |
-| ------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `/api/dcim/connected-device/`              | 3-segment collection, `GET` only, **no detail route, no POST** — a query endpoint that the segment-count rule would wrongly admit as an object type.    |
-| `/api/extras/dashboard/`                   | 3-segment collection whose `PUT`/`PATCH`/`DELETE` are **singleton** ops (`extras_dashboard_update`), _not_ bulk ops. The inverse of the bulk trap.      |
-| `/api/users/permissions/`, `/{id}/`        | URL slug ≠ model name: path yields `users.permission`, NetBox's own object type is `users.objectpermission`. Write schema is `ObjectPermissionRequest`. |
-| `/api/core/background-queues/`, `/{name}/` | Viewset with no serializer; detail param is `{name}`, not `{id}`; no POST; response schema is unresolvable.                                             |
-| `/api/extras/scripts/`                     | Has a `POST` with **no `application/json` request body schema at all**.                                                                                 |
-| `/api/ipam/prefixes/{id}/available-ips/`   | Sub-resource action on a detail path — 5 segments, `GET` + `POST`, not an object type.                                                                  |
-| `/api/status/`, `/api/schema/`             | 2-segment `/api/*` endpoints that are not object types.                                                                                                 |
+| Path                                                                           | Why it is here                                                                                                                                          |
+| ------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `/api/dcim/connected-device/`                                                  | 3-segment collection, `GET` only, **no detail route, no POST** — a query endpoint that the segment-count rule would wrongly admit as an object type.    |
+| `/api/extras/dashboard/`                                                       | 3-segment collection whose `PUT`/`PATCH`/`DELETE` are **singleton** ops (`extras_dashboard_update`), _not_ bulk ops. The inverse of the bulk trap.      |
+| `/api/users/permissions/`, `/{id}/`                                            | URL slug ≠ model name: path yields `users.permission`, NetBox's own object type is `users.objectpermission`. Write schema is `ObjectPermissionRequest`. |
+| `/api/core/background-queues/`, `/{name}/`                                     | Viewset with no serializer; detail param is `{name}`, not `{id}`; no POST; response schema is unresolvable.                                             |
+| `/api/extras/scripts/`                                                         | Has a `POST` with **no `application/json` request body schema at all**.                                                                                 |
+| `/api/ipam/prefixes/{id}/available-ips/`                                       | Sub-resource action on a detail path — 5 segments, `GET` + `POST`, not an object type.                                                                  |
+| `/api/dcim/interfaces/{id}/trace/`, `/api/dcim/{front,rear}-ports/{id}/paths/` | Read-only cable-trace actions on detail paths, not object types.                                                                                        |
+| `/api/status/`, `/api/schema/`                                                 | 2-segment `/api/*` endpoints that are not object types.                                                                                                 |
 
 Also present because they are in the `$ref` closure and are load-bearing for the write-schema
 tests: `WritableDeviceWithConfigContextRequest`, `DeviceWithConfigContextRequest` (the

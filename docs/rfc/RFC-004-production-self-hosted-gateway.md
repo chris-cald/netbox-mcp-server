@@ -92,10 +92,11 @@ caller's control.
 3. **M3 HTTP/OIDC:** validate the installed MCP SDK's Streamable HTTP API,
    session lifecycle, OIDC issuer/audience/claim policy, CSRF/origin policy,
    rate limits, audit events, and tenant isolation against supported versions.
-4. **M3a registry/actions (implemented for IPAM prefix availability only):**
-   a closed registry validates schema-confirmed native GET/POST detail actions,
-   action-specific inputs, target type, and read/write classification before
-   dispatch. Other actions remain deferred.
+4. **M3a/M3b registry/actions (implemented):** a closed registry validates
+   schema-confirmed native IPAM prefix availability GET/POST and DCIM interface
+   trace/front-port/rear-port path GET detail actions, their action-specific
+   inputs, target type, and read/write classification before dispatch. Other
+   actions remain deferred.
 5. **M5 bulk/deployment:** validate bulk atomicity and partial failures, then
    publish the deployment and operational model.
 

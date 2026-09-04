@@ -1,5 +1,5 @@
 /**
- * Closed semantic-action registry for native IPAM prefix availability APIs.
+ * Closed semantic-action registry for native NetBox detail actions.
  *
  * The registry names the only semantic operations this server understands. Its
  * envelopes and metadata are constructed from the connected instance's OpenAPI
@@ -11,57 +11,67 @@ import { z } from "zod";
 import type {
   DetailActionContract,
   DetailActionMethod,
+  DetailActionName,
   DetailActionSchema,
   SchemaProvider,
 } from "../schema/types.js";
 
 export type ActionAccess = "read" | "write";
-export type PrefixActionName = "ipam.prefix.available_ips" | "ipam.prefix.allocate_ip";
+export type SemanticActionName =
+  | "ipam.prefix.available_ips"
+  | "ipam.prefix.allocate_ip"
+  | "dcim.interface.trace"
+  | "dcim.front_port.paths"
+  | "dcim.rear_port.paths";
 
 const integerId = z.number().int().positive();
 const objectInput = z.record(z.string(), z.unknown());
 
-/** M3a deliberately supports only the native contracts verified for NetBox 4.6.x. */
+/** M3a/M3b support only native contracts verified for NetBox 4.6.x. */
 const SUPPORTED_ACTION_VERSION = /^4\.6\.\d+$/;
 /** Allocation is one native request item; bulk writes belong in netbox_write. */
 export const MAX_ALLOCATION_ITEMS = 1;
 /** Keep a single allocation request within the server's 25 KiB response budget. */
 export const MAX_ALLOCATION_PAYLOAD_BYTES = 25 * 1024;
 
-interface PrefixActionDefinition {
-  name: PrefixActionName;
-  target_resource_type: "ipam.prefix";
+interface SemanticActionDefinition {
+  name: SemanticActionName;
+  target_resource_type:
+    "ipam.prefix" | "dcim.interface" | "dcim.frontport" | "dcim.rearport";
   classification: { access: ActionAccess; destructive: false };
   description: string;
-  native: { action: "available-ips"; method: DetailActionMethod };
-  envelope: "query" | "data";
+  native: { action: DetailActionName; method: DetailActionMethod };
+  envelope: "query" | "data" | "none";
+  result: "native-array" | "interface-trace" | "port-paths";
 }
 
 export interface SemanticActionMetadata {
-  name: PrefixActionName;
-  target_resource_type: "ipam.prefix";
+  name: SemanticActionName;
+  target_resource_type:
+    "ipam.prefix" | "dcim.interface" | "dcim.frontport" | "dcim.rearport";
   classification: { access: ActionAccess; destructive: false };
   description: string;
-  native: { action: "available-ips"; method: DetailActionMethod };
+  native: { action: DetailActionName; method: DetailActionMethod };
   /** The only accepted tool input envelope, derived from the native contract. */
   input_schema: DetailActionSchema;
-  /** The native JSON response schema from the connected instance. */
+  /** The bounded MCP result schema, derived from the confirmed native action. */
   output_schema: DetailActionSchema;
 }
 
 export interface CompactSemanticActionMetadata {
-  name: PrefixActionName;
-  target_resource_type: "ipam.prefix";
+  name: SemanticActionName;
+  target_resource_type:
+    "ipam.prefix" | "dcim.interface" | "dcim.frontport" | "dcim.rearport";
   classification: { access: ActionAccess; destructive: false };
-  native: { action: "available-ips"; method: DetailActionMethod };
+  native: { action: DetailActionName; method: DetailActionMethod };
   metadata_truncated: true;
 }
 
 export type AdvertisedSemanticActionMetadata =
   SemanticActionMetadata | CompactSemanticActionMetadata;
 
-export interface ApplicablePrefixAction {
-  definition: PrefixActionDefinition;
+export interface ApplicableSemanticAction {
+  definition: SemanticActionDefinition;
   contract: DetailActionContract;
   metadata: SemanticActionMetadata;
 }
@@ -102,7 +112,7 @@ export function boundedSemanticActionMetadata(actions: SemanticActionMetadata[])
   return { actions: actions.map(compactSemanticActionMetadata), truncated: true };
 }
 
-const definitions: readonly PrefixActionDefinition[] = Object.freeze([
+const definitions: readonly SemanticActionDefinition[] = Object.freeze([
   {
     name: "ipam.prefix.available_ips",
     target_resource_type: "ipam.prefix",
@@ -110,6 +120,7 @@ const definitions: readonly PrefixActionDefinition[] = Object.freeze([
     description: "List native available IP addresses within this prefix.",
     native: { action: "available-ips", method: "get" },
     envelope: "query",
+    result: "native-array",
   },
   {
     name: "ipam.prefix.allocate_ip",
@@ -119,36 +130,82 @@ const definitions: readonly PrefixActionDefinition[] = Object.freeze([
       "Allocate IP addresses through NetBox's native availability endpoint exactly once; allocations are never retried.",
     native: { action: "available-ips", method: "post" },
     envelope: "data",
+    result: "native-array",
+  },
+  {
+    name: "dcim.interface.trace",
+    target_resource_type: "dcim.interface",
+    classification: { access: "read", destructive: false },
+    description: "Trace the native cable path from this interface.",
+    native: { action: "trace", method: "get" },
+    envelope: "none",
+    result: "interface-trace",
+  },
+  {
+    name: "dcim.front_port.paths",
+    target_resource_type: "dcim.frontport",
+    classification: { access: "read", destructive: false },
+    description: "List native cable paths through this front port.",
+    native: { action: "paths", method: "get" },
+    envelope: "none",
+    result: "port-paths",
+  },
+  {
+    name: "dcim.rear_port.paths",
+    target_resource_type: "dcim.rearport",
+    classification: { access: "read", destructive: false },
+    description: "List native cable paths through this rear port.",
+    native: { action: "paths", method: "get" },
+    envelope: "none",
+    result: "port-paths",
   },
 ]);
 
-export function prefixAction(name: string): PrefixActionDefinition | undefined {
+export function semanticAction(name: string): SemanticActionDefinition | undefined {
   return definitions.find((action) => action.name === name);
 }
 
 export const InvokeInput = z
   .object({
-    operation: z.enum(["ipam.prefix.available_ips", "ipam.prefix.allocate_ip"]),
-    target: integerId.describe("Numeric id of the target ipam.prefix object."),
+    operation: z.enum([
+      "ipam.prefix.available_ips",
+      "ipam.prefix.allocate_ip",
+      "dcim.interface.trace",
+      "dcim.front_port.paths",
+      "dcim.rear_port.paths",
+    ]),
+    target: integerId.describe("Positive numeric id of the semantic action target."),
     input: objectInput.default({}),
   })
   .strict();
 
 function actionIsCompatible(
-  action: PrefixActionDefinition,
+  action: SemanticActionDefinition,
   contract: DetailActionContract | undefined,
 ): contract is DetailActionContract & { response_schema: DetailActionSchema } {
   if (
     !contract?.path_id_schema ||
     contract.path_id_schema.type !== "integer" ||
-    !contract.response_schema ||
-    contract.response_schema.type !== "array" ||
-    contract.response_schema.items?.type !== "object"
+    !contract.response_schema
   )
     return false;
-  // A read action accepts query parameters only: an undocumented body, whether
-  // JSON or not, is a different contract and is never sent by this tool.
-  if (action.envelope === "query") return contract.request_content === "none";
+  // The trace actions use no caller-controlled query/body values. NetBox's
+  // generated response declaration is an object even though trace results are
+  // arrays, so the documented native result shape is checked after the GET.
+  if (action.envelope === "none") {
+    return (
+      contract.request_content === "none" &&
+      !contract.query_schema.required?.length &&
+      contract.response_schema.type === "object"
+    );
+  }
+  if (action.envelope === "query") {
+    return (
+      contract.request_content === "none" &&
+      contract.response_schema.type === "array" &&
+      contract.response_schema.items?.type === "object"
+    );
+  }
   return (
     contract.request_content === "json" &&
     contract.request_required &&
@@ -161,21 +218,24 @@ function actionIsCompatible(
   );
 }
 
-export function supportsPrefixActionVersion(version: string): boolean {
+export function supportsSemanticActionVersion(version: string): boolean {
   return SUPPORTED_ACTION_VERSION.test(version);
 }
 
-export function prefixActionVersionError(version: string): string {
+export function semanticActionVersionError(version: string): string {
   return (
-    `Controlled prefix actions require a schema from NetBox 4.6.x (>=4.6.0, <4.7.0); ` +
+    `Controlled semantic actions require a schema from NetBox 4.6.x (>=4.6.0, <4.7.0); ` +
     `this instance reports "${version}". The action was not sent.`
   );
 }
 
 function inputSchema(
-  action: PrefixActionDefinition,
+  action: SemanticActionDefinition,
   contract: DetailActionContract,
 ): DetailActionSchema {
+  if (action.envelope === "none") {
+    return { type: "object", additionalProperties: false };
+  }
   if (action.envelope === "query") {
     return {
       type: "object",
@@ -192,7 +252,7 @@ function inputSchema(
 }
 
 function actionMetadata(
-  action: PrefixActionDefinition,
+  action: SemanticActionDefinition,
   contract: DetailActionContract & { response_schema: DetailActionSchema },
 ): SemanticActionMetadata {
   return {
@@ -202,18 +262,39 @@ function actionMetadata(
     description: action.description,
     native: action.native,
     input_schema: inputSchema(action, contract),
-    output_schema: contract.response_schema,
+    output_schema:
+      action.result === "interface-trace"
+        ? {
+            type: "object",
+            required: ["kind", "path"],
+            additionalProperties: false,
+            properties: {
+              kind: { type: "string", enum: ["interface-trace"] },
+              path: { type: "array" },
+            },
+          }
+        : action.result === "port-paths"
+          ? {
+              type: "object",
+              required: ["kind", "paths"],
+              additionalProperties: false,
+              properties: {
+                kind: { type: "string", enum: ["port-paths"] },
+                paths: { type: "array" },
+              },
+            }
+          : contract.response_schema,
   };
 }
 
 /** Return one action only when its full request/query/response shape is proven. */
-export async function applicablePrefixAction(
+export async function applicableSemanticAction(
   schema: SchemaProvider,
-  action: PrefixActionDefinition,
+  action: SemanticActionDefinition,
   version?: string,
-): Promise<ApplicablePrefixAction | undefined> {
+): Promise<ApplicableSemanticAction | undefined> {
   const actionVersion = version ?? (await schema.version());
-  if (!supportsPrefixActionVersion(actionVersion)) return undefined;
+  if (!supportsSemanticActionVersion(actionVersion)) return undefined;
   const contract = await schema.detailActionContract?.(
     action.target_resource_type,
     action.native.action,
@@ -224,15 +305,16 @@ export async function applicablePrefixAction(
 }
 
 /** Return only semantic actions whose full native contract is proven by this instance. */
-export async function applicablePrefixActions(
+export async function applicableSemanticActions(
   schema: SchemaProvider,
   objectType: string,
 ): Promise<SemanticActionMetadata[]> {
-  if (objectType !== "ipam.prefix") return [];
   const version = await schema.version();
-  if (!supportsPrefixActionVersion(version)) return [];
+  if (!supportsSemanticActionVersion(version)) return [];
   const applicable = await Promise.all(
-    definitions.map((action) => applicablePrefixAction(schema, action, version)),
+    definitions
+      .filter((action) => action.target_resource_type === objectType)
+      .map((action) => applicableSemanticAction(schema, action, version)),
   );
   return applicable.flatMap((action) => (action ? [action.metadata] : []));
 }
@@ -312,15 +394,22 @@ function schemaError(
 }
 
 export function requestForAction(
-  action: ApplicablePrefixAction,
+  action: ApplicableSemanticAction,
   input: Record<string, unknown>,
 ): { body?: unknown; params?: Record<string, unknown> } {
-  const allowed = action.definition.envelope === "query" ? ["query"] : ["data"];
+  const allowed =
+    action.definition.envelope === "query"
+      ? ["query"]
+      : action.definition.envelope === "data"
+        ? ["data"]
+        : [];
   const unexpected = Object.keys(input).some((key) => !allowed.includes(key));
   if (unexpected)
     throw new Error(
       `Invalid input for "${action.definition.name}": input contains an unsupported field.`,
     );
+
+  if (action.definition.envelope === "none") return {};
 
   if (action.definition.envelope === "query") {
     const query = input.query ?? {};
@@ -359,11 +448,28 @@ export function requestForAction(
   return { body: input.data };
 }
 
-/** Validate the entire native response, including every item and required field. */
+/** Preserve native trace/path JSON without attempting a local graph traversal. */
 export function validateActionResponse(
-  action: ApplicablePrefixAction,
+  action: ApplicableSemanticAction,
   response: unknown,
 ): unknown[] {
+  if (!Array.isArray(response)) {
+    throw new Error(
+      "NetBox returned a response that does not match the controlled action result.",
+    );
+  }
+  if (action.definition.result === "interface-trace") return response;
+  if (action.definition.result === "port-paths") {
+    for (const [index, item] of response.entries()) {
+      if (!isPortPath(item)) {
+        throw new Error(
+          `NetBox returned a response that does not match the controlled port-path result at response[${index}].`,
+        );
+      }
+    }
+    return response;
+  }
+
   const responseSchema = action.contract.response_schema;
   if (!responseSchema) {
     throw new Error("The schema-confirmed action response contract is unavailable.");
@@ -374,12 +480,26 @@ export function validateActionResponse(
       `NetBox returned a response that does not match the schema-confirmed result: ${error}.`,
     );
   }
-  // `actionIsCompatible` proves the response is an array, and schemaError
-  // confirms it. Keep this guard to make the boundary explicit at runtime.
-  if (!Array.isArray(response)) {
-    throw new Error(
-      "NetBox returned a response that does not match the schema-confirmed array result.",
-    );
-  }
   return response;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isPortPath(value: unknown): boolean {
+  if (
+    !isRecord(value) ||
+    !Number.isInteger(value.id) ||
+    typeof value.is_active !== "boolean" ||
+    typeof value.is_complete !== "boolean" ||
+    typeof value.is_split !== "boolean"
+  )
+    return false;
+  return (
+    Array.isArray(value.path) &&
+    value.path.every(
+      (segment) => Array.isArray(segment) && segment.every((node) => isRecord(node)),
+    )
+  );
 }

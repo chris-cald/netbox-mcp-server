@@ -63,7 +63,7 @@ The server registers exactly six tools, on every install, regardless of configur
 | `netbox_describe`      | 2     | Explains one object type: required fields, optional fields, read-only fields, accepted filters, and what must exist first. |
 | `netbox_read`          | 3     | `list` (filtered, paginated) or `get` (one object by id). Never modifies anything.                                         |
 | `netbox_write`         | 3     | `create`, `update` or `delete`. Changes NetBox records.                                                                    |
-| `netbox_invoke`        | 3     | Runs schema-confirmed, controlled IPAM prefix availability reads and allocations.                                          |
+| `netbox_invoke`        | 3     | Runs schema-confirmed, controlled IPAM prefix availability/allocation and DCIM cable trace/path actions.                   |
 
 **The object types those tools address are not fixed.** They are derived at runtime from
 the connected instance's own `/api/schema/` document, so which types exist depends on

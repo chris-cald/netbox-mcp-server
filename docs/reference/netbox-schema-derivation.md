@@ -494,15 +494,22 @@ GET|POST /api/ipam/vlan-groups/{id}/available-vlans/
 ```
 
 The `available-*` endpoints are the ones an agent will genuinely want (allocate the next free
-IP/prefix/VLAN). **Superseded by M3a:** do not hand-wire all five merely because the paths
-exist. `netbox_invoke` exposes only a closed semantic action after the connected instance is
-NetBox 4.6.x and its full JSON request, query, and array-response contract is proven. The
-current implementation therefore exposes the two `ipam.prefix.available-ips` actions only.
-Allocation POST accepts exactly one object array item and is sent once; it is **never
-automatically retried**, preserving NetBox's allocation concurrency and conflict semantics.
-`available-prefixes`, range, and VLAN actions remain unavailable until their complete contracts
-and explicit version support are added. They are not derivable as object types, but path/method
-presence alone is not sufficient to expose them.
+IP/prefix/VLAN). **Superseded by M3a/M3b:** do not hand-wire every path/method merely because it exists.
+`netbox_invoke` exposes a closed semantic action only after the connected instance is NetBox
+4.6.x and its full native contract is proven. The current implementation exposes exactly:
+
+- `ipam.prefix.available_ips` (native `GET available-ips`) and
+  `ipam.prefix.allocate_ip` (native `POST available-ips`);
+- `dcim.interface.trace` (native `GET trace`), `dcim.front_port.paths`, and
+  `dcim.rear_port.paths` (native `GET paths`).
+
+The three DCIM actions accept no caller-controlled input and preserve NetBox's native trace/path
+JSON; this server never traverses or renders a cable graph. Allocation POST accepts exactly one
+object array item and is sent once; it is **never automatically retried**, preserving NetBox's
+allocation concurrency and conflict semantics. `available-prefixes`, range, VLAN, console, power,
+and circuit actions remain unavailable until their complete contracts and explicit version support
+are added. They are not derivable as object types, but path/method presence alone is not sufficient
+to expose them.
 
 **E. Plugin paths: none.** `/api/plugins/**` does not appear anywhere in the stock 4.6.7
 document, because it is generated from a NetBox with no plugins installed. Every plugin claim

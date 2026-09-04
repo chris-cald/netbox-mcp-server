@@ -131,7 +131,7 @@ do, at session start; nothing else does.
 | `netbox_describe`      | Explains one object type: required fields, optional fields with enum values, read-only fields, prerequisites, and the filters `list` accepts. |
 | `netbox_read`          | Reads objects — one by id, or a filtered, paginated list. Never modifies anything.                                                            |
 | `netbox_write`         | Creates, updates or deletes one object.                                                                                                       |
-| `netbox_invoke`        | Runs one schema-confirmed, controlled IPAM prefix availability or allocation action.                                                          |
+| `netbox_invoke`        | Runs one schema-confirmed, closed IPAM prefix availability/allocation or DCIM cable-trace read action.                                        |
 
 The intended path for a change is `netbox_discover` → `netbox_describe` → `netbox_write`.
 `netbox_global_search` is the shortcut past that: looking one named object up costs a
@@ -157,12 +157,15 @@ A few behaviours worth knowing:
   Lists page at 50 by default (max 1000) and report `total`, `has_more` and
   `next_offset`; any response over 25,000 characters is truncated with the offset to
   resume from.
-- `netbox_invoke` advertises prefix availability actions only for NetBox **4.6.x**
-  schemas whose complete JSON request/query/response contracts match. Its
-  `allocate_ip` action accepts exactly one object array item and a serialized UTF-8 JSON
-  body no larger than **25 KiB**; use `netbox_write` for deliberate multi-record changes.
-  Its allocation POST is sent once and is **never automatically retried**, so NetBox
-  retains allocation concurrency and conflict semantics.
+- `netbox_invoke` advertises only these closed actions when a NetBox **4.6.x** schema
+  proves each complete native contract: `ipam.prefix.available_ips`,
+  `ipam.prefix.allocate_ip`, `dcim.interface.trace`, `dcim.front_port.paths`, and
+  `dcim.rear_port.paths`. The DCIM actions are native no-input GETs; the server does not
+  traverse or render a cable graph. `allocate_ip` accepts exactly one object array item
+  and a serialized UTF-8 JSON body no larger than **25 KiB**; use `netbox_write` for
+  deliberate multi-record changes. Its allocation POST is sent once and is **never
+  automatically retried**, so NetBox retains allocation concurrency and conflict
+  semantics.
 
 **Layering costs round-trips.** A trivial read that one `netbox_read` call answers has
 been observed taking four calls, and a name lookup ten. That is measured, not estimated,

@@ -34,14 +34,14 @@ The whole NetBox API is reached through six tools. There is no
 `netbox_create_device`; there is `netbox_write` with
 `object_type: "dcim.device"`.
 
-| Tool                   | Answers                                        | Key arguments                                                                                |
-| ---------------------- | ---------------------------------------------- | -------------------------------------------------------------------------------------------- |
-| `netbox_global_search` | "where is the thing called X?"                 | `query`, `resources[]`, `limit_per_resource`, `response_format`                              |
-| `netbox_discover`      | "which object types exist here?"               | `query`, `app`                                                                               |
-| `netbox_describe`      | "what does this type need for this operation?" | `object_type`, `operation` (list/get/create/update/delete)                                   |
-| `netbox_read`          | list or get objects                            | `object_type`, `operation` (list/get), `id`, `filters`, `limit`, `offset`, `response_format` |
-| `netbox_write`         | create, update or delete                       | `object_type`, `operation` (create/update/delete), `id`, `data`, `confirm`                   |
-| `netbox_invoke`        | controlled IPAM prefix availability/allocation | `operation`, numeric `target`, action-specific `input`                                       |
+| Tool                   | Answers                                                                        | Key arguments                                                                                |
+| ---------------------- | ------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------- |
+| `netbox_global_search` | "where is the thing called X?"                                                 | `query`, `resources[]`, `limit_per_resource`, `response_format`                              |
+| `netbox_discover`      | "which object types exist here?"                                               | `query`, `app`                                                                               |
+| `netbox_describe`      | "what does this type need for this operation?"                                 | `object_type`, `operation` (list/get/create/update/delete)                                   |
+| `netbox_read`          | list or get objects                                                            | `object_type`, `operation` (list/get), `id`, `filters`, `limit`, `offset`, `response_format` |
+| `netbox_write`         | create, update or delete                                                       | `object_type`, `operation` (create/update/delete), `id`, `data`, `confirm`                   |
+| `netbox_invoke`        | controlled IPAM prefix availability/allocation and DCIM cable trace/path reads | `operation`, numeric `target`, action-specific `input`                                       |
 
 `netbox_discover` and `netbox_describe` are generated from the connected
 instance's own OpenAPI schema, so they describe **that** instance — its NetBox
