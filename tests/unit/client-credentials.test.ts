@@ -87,6 +87,42 @@ describe("NetBoxClient credentials", () => {
     expect(authorization).toBe(`${scheme} ${token}`);
   });
 
+  it("sends native collection actions once with the schema-selected method and delete body", async () => {
+    const requests: Array<{
+      method: string | undefined;
+      url: string | undefined;
+      data: unknown;
+    }> = [];
+    const http = axios.create({
+      adapter: (request) => {
+        requests.push({ method: request.method, url: request.url, data: request.data });
+        return Promise.resolve({
+          data: [],
+          status: 200,
+          statusText: "OK",
+          headers: {},
+          config: request,
+        });
+      },
+    });
+    const client = new NetBoxClient(
+      {
+        baseUrl: "https://netbox.example.com",
+        apiUrl: "https://netbox.example.com/api",
+        credentials: { getToken: () => Promise.resolve("token") },
+        insecure: false,
+      },
+      { http },
+    );
+    const items = [{ id: 12 }];
+    await client.collectionAction("dcim/devices", "patch", items);
+    await client.collectionAction("dcim/devices", "delete", items);
+    expect(requests).toEqual([
+      { method: "patch", url: "/dcim/devices/", data: JSON.stringify(items) },
+      { method: "delete", url: "/dcim/devices/", data: JSON.stringify(items) },
+    ]);
+  });
+
   it("does not forward Authorization to a redirect subdomain", async () => {
     const token = "redirect-token-that-must-not-leak";
     let redirectedAuthorization: string | undefined;

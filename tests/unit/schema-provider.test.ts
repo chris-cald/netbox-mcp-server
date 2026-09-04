@@ -119,6 +119,106 @@ describe("describe", () => {
   });
 });
 
+describe("native bulk contracts", () => {
+  it("derives only collection paths with exact array request and successful response contracts", async () => {
+    await expect(
+      provider.bulkOperationContract?.("dcim.site", "bulk_create"),
+    ).resolves.toMatchObject({
+      method: "post",
+      request_schema: { type: "array", items: { type: "object" } },
+      response_content: "json",
+      response_schema: { type: "object" },
+    });
+    await expect(
+      provider.bulkOperationContract?.("dcim.site", "bulk_update"),
+    ).resolves.toMatchObject({
+      method: "patch",
+      request_schema: { type: "array", items: { type: "object", required: ["id"] } },
+      response_content: "json",
+      response_schema: { type: "array", items: { type: "object" } },
+    });
+    await expect(
+      provider.bulkOperationContract?.("dcim.site", "bulk_delete"),
+    ).resolves.toMatchObject({
+      method: "delete",
+      request_schema: { type: "array", items: { type: "object" } },
+      response_content: "none",
+    });
+  });
+
+  it("preserves scalar limits and anyOf alternatives for local bulk validation", async () => {
+    const constrained = createSchemaProviderFromDocument({
+      paths: {
+        "/api/dcim/widgets/": {
+          post: {
+            requestBody: {
+              required: true,
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        count: { type: "integer", minimum: 1, maximum: 3 },
+                        name: { type: "string", minLength: 2, maxLength: 4 },
+                        selector: {
+                          anyOf: [{ type: "integer" }, { type: "string", minLength: 3 }],
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            responses: {
+              "201": { content: { "application/json": { schema: { type: "object" } } } },
+            },
+          },
+        },
+        "/api/dcim/widgets/{id}/": { get: {} },
+      },
+    });
+    await expect(
+      constrained.bulkOperationContract?.("dcim.widget", "bulk_create"),
+    ).resolves.toMatchObject({
+      request_schema: {
+        items: {
+          properties: {
+            count: { minimum: 1, maximum: 3 },
+            name: { minLength: 2, maxLength: 4 },
+            selector: { anyOf: [{ type: "integer" }, { type: "string", minLength: 3 }] },
+          },
+        },
+      },
+    });
+  });
+
+  it("refuses a collection operation when a required contract component is absent", async () => {
+    const incomplete = createSchemaProviderFromDocument({
+      paths: {
+        "/api/dcim/widgets/": {
+          post: {
+            requestBody: {
+              required: true,
+              content: {
+                "application/json": {
+                  schema: { type: "array", items: { type: "object" } },
+                },
+              },
+            },
+            responses: {},
+          },
+        },
+        "/api/dcim/widgets/{id}/": { get: {} },
+      },
+    });
+    await expect(
+      incomplete.bulkOperationContract?.("dcim.widget", "bulk_create"),
+    ).resolves.toBeUndefined();
+  });
+});
+
 describe("laziness", () => {
   it("does not fetch anything until a method is called", async () => {
     const calls: string[] = [];

@@ -129,7 +129,7 @@ Practical points:
   `display`, `name`, `slug`, `description`). Use it when scanning many objects
   for an id; drop it when you need the full record.
 
-## `netbox_write` — create, update, delete
+## `netbox_write` — create, update, delete, native bulk writes
 
 ```json
 { "object_type": "dcim.device", "operation": "create",
@@ -157,6 +157,16 @@ Practical points:
   and shows both values. Call it without `confirm` first if you need to see the
   current value — that error tells you the `display` string. Deletes cascade and
   cannot be undone: get the user's explicit agreement before calling.
+- `bulk_create`, `bulk_update`, and `bulk_delete` take `items` and only appear
+  usable when the connected OpenAPI document proves the exact native collection
+  POST, PATCH, or DELETE contract. The advertised item schema is enforced
+  locally, with a maximum of 100 items and 25 KiB of UTF-8 JSON. Never guess a
+  bulk endpoint.
+- `bulk_update` and `bulk_delete` require a two-call confirmation: call without
+  `confirm`, get a random token bound to that exact operation/type/payload, then
+  get the user's approval and send it once within five minutes. The token is
+  consumed before dispatch, even if it fails; changed payloads and retries need
+  a new token. No bulk request is automatically retried.
 
 ## `netbox_invoke` — schema-confirmed semantic actions
 

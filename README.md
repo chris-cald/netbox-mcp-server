@@ -130,7 +130,7 @@ do, at session start; nothing else does.
 | `netbox_discover`      | Lists the object types this instance supports, and the operations each one allows.                                                            |
 | `netbox_describe`      | Explains one object type: required fields, optional fields with enum values, read-only fields, prerequisites, and the filters `list` accepts. |
 | `netbox_read`          | Reads objects — one by id, or a filtered, paginated list. Never modifies anything.                                                            |
-| `netbox_write`         | Creates, updates or deletes one object.                                                                                                       |
+| `netbox_write`         | Creates, updates or deletes one object, plus schema-confirmed native bulk creates, updates and deletes.                                       |
 | `netbox_invoke`        | Runs one schema-confirmed, closed IPAM prefix availability/allocation or DCIM cable-trace read action.                                        |
 
 The intended path for a change is `netbox_discover` → `netbox_describe` → `netbox_write`.
@@ -153,6 +153,13 @@ A few behaviours worth knowing:
 - **`delete` requires `confirm` to equal the object's current `display` value.** Read the
   object first, copy `display`, pass it back. NetBox cascades deletes — removing a site
   can remove its racks, devices and prefixes — and it cannot be undone.
+- **Bulk writes are closed native collection operations.** `bulk_create`, `bulk_update`
+  and `bulk_delete` accept `items` only when the connected OpenAPI document proves the
+  collection path, exact POST/PATCH/DELETE method, JSON-array request and success response.
+  They locally enforce the advertised item schema, at most 100 items, and a 25 KiB UTF-8
+  payload. `bulk_update` and `bulk_delete` first refuse and issue a random confirmation
+  token bound to that exact operation, object type and canonical payload; the token expires
+  after five minutes and is consumed before the one-shot dispatch, even if dispatch fails.
 - `netbox_read` and `netbox_global_search` return Markdown by default or JSON on request.
   Lists page at 50 by default (max 1000) and report `total`, `has_more` and
   `next_offset`; any response over 25,000 characters is truncated with the offset to

@@ -17,6 +17,10 @@ export type ObjectTypeKey = string;
 
 export type Operation = "list" | "get" | "create" | "update" | "delete";
 
+/** Closed native collection writes exposed only through netbox_write. */
+export type BulkOperation = "bulk_create" | "bulk_update" | "bulk_delete";
+export type BulkOperationMethod = "post" | "patch" | "delete";
+
 /** Schema-confirmed native detail actions available to the semantic action layer. */
 export type DetailActionName = "available-ips" | "available-prefixes" | "trace" | "paths";
 export type DetailActionMethod = "get" | "post";
@@ -27,6 +31,7 @@ export interface DetailActionSchema {
   format?: string | undefined;
   description?: string | undefined;
   nullable?: boolean | undefined;
+  readOnly?: boolean | undefined;
   enum?: unknown[] | undefined;
   default?: unknown;
   minimum?: number | undefined;
@@ -47,6 +52,17 @@ export interface DetailActionSchema {
  * contains only request/query/response shapes, not an endpoint path, so the
  * tool layer cannot turn it into arbitrary HTTP.
  */
+export interface BulkOperationContract {
+  /** Method bound to this operation; callers never provide it. */
+  method: BulkOperationMethod;
+  /** Full JSON array request shape as declared by the collection endpoint. */
+  request_schema: DetailActionSchema;
+  /** Whether the successful response has a JSON body or is intentionally empty. */
+  response_content: "json" | "none";
+  /** Present only for a JSON response. */
+  response_schema?: DetailActionSchema | undefined;
+}
+
 export interface DetailActionContract {
   /** Required integer `{id}` path parameter that the tool maps from `target`. */
   path_id_schema?: DetailActionSchema | undefined;
@@ -219,6 +235,17 @@ export interface SchemaProvider {
   resolve(objectType: ObjectTypeKey): Promise<ObjectTypeSummary | undefined>;
 
   describe(objectType: ObjectTypeKey, operation: Operation): Promise<DescribeResult>;
+
+  /**
+   * Schema-confirmed native collection write contract. An absent contract is
+   * unsupported: operation, method, collection path, JSON request and success
+   * response must all be present in the instance document.
+   */
+  bulkOperationContract?(
+    this: void,
+    objectType: ObjectTypeKey,
+    operation: BulkOperation,
+  ): Promise<BulkOperationContract | undefined>;
 
   /**
    * Whether this instance's OpenAPI document exposes the exact native detail

@@ -40,7 +40,7 @@ The whole NetBox API is reached through six tools. There is no
 | `netbox_discover`      | "which object types exist here?"                                               | `query`, `app`                                                                               |
 | `netbox_describe`      | "what does this type need for this operation?"                                 | `object_type`, `operation` (list/get/create/update/delete)                                   |
 | `netbox_read`          | list or get objects                                                            | `object_type`, `operation` (list/get), `id`, `filters`, `limit`, `offset`, `response_format` |
-| `netbox_write`         | create, update or delete                                                       | `object_type`, `operation` (create/update/delete), `id`, `data`, `confirm`                   |
+| `netbox_write`         | single CRUD or schema-confirmed native bulk writes                             | `object_type`, `operation`, `id`, `data`, `items`, `confirm`                                 |
 | `netbox_invoke`        | controlled IPAM prefix availability/allocation and DCIM cable trace/path reads | `operation`, numeric `target`, action-specific `input`                                       |
 
 `netbox_discover` and `netbox_describe` are generated from the connected
@@ -113,6 +113,13 @@ ids, so the user has a record and can spot anything wrong.
   copy `display`, confirm the deletion with the **user**, then call. NetBox
   cascades deletes — removing a site can remove its racks, devices and prefixes
   — and there is no undo.
+- **Bulk update/delete use one-time confirmation tokens.** `bulk_create`,
+  `bulk_update`, and `bulk_delete` are only available when the live OpenAPI
+  schema proves the native collection contract. Bulk payloads are schema-checked
+  and capped at 100 items/25 KiB. For update/delete, first call without
+  `confirm`, get a random token bound to the exact payload, then use it once
+  within five minutes after user approval. Dispatch failures consume it too;
+  changed payloads and retries need a new token.
 - **Describe once per type per task, not once per object.** Creating twelve
   interfaces is one `netbox_describe` on `dcim.interface` and twelve
   `netbox_write` calls.
