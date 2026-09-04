@@ -3,6 +3,7 @@ import { once, EventEmitter } from "node:events";
 import { mkdtemp, readFile, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { describe, expect, it, vi } from "vitest";
 
@@ -186,7 +187,7 @@ async function runRunner(env: NodeJS.ProcessEnv): Promise<{
   code: number | null;
   stderr: string;
 }> {
-  const child = execFile(process.execPath, [runner.pathname], { env });
+  const child = execFile(process.execPath, [fileURLToPath(runner)], { env });
   let stderr = "";
   child.stderr?.on("data", (chunk: Buffer) => {
     stderr += chunk.toString();
