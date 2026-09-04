@@ -93,7 +93,7 @@ Please include your NetBox version in any bug report.
 ### Patched local E2E fixture
 
 `npm test` never builds or starts containers. `npm run test:e2e` is the explicit,
-Podman-backed check for the controlled available-IPs path. It builds
+Podman-backed check for controlled prefix availability/allocation and DCIM trace/path reads. It builds
 `localhost/netbox-mcp-e2e:4.6.7-635361b` locally from the public fork commit
 [`635361b87d67b70e9338fa141e8ad932c2b2fba4`](https://github.com/chris-cald/netbox/commit/635361b87d67b70e9338fa141e8ad932c2b2fba4).
 The runner verifies the source revision and the built image provenance before

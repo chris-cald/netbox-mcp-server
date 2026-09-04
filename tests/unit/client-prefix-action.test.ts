@@ -11,7 +11,7 @@ const config: NetBoxConfig = {
   insecure: false,
 };
 
-describe("NetBoxClient prefix detail action transport", () => {
+describe("NetBoxClient semantic detail action transport", () => {
   it("sends the native GET path and schema-confirmed query parameters", async () => {
     const requests: Array<{
       url: string | undefined;
@@ -31,7 +31,7 @@ describe("NetBoxClient prefix detail action transport", () => {
       },
     });
 
-    await new NetBoxClient(config, { http }).prefixDetailAction(
+    await new NetBoxClient(config, { http }).detailAction(
       "ipam/prefixes",
       42,
       "available-ips",
@@ -69,7 +69,7 @@ describe("NetBoxClient prefix detail action transport", () => {
     });
     const body = [{ prefix_length: 31, description: "allocated by MCP" }];
 
-    await new NetBoxClient(config, { http }).prefixDetailAction(
+    await new NetBoxClient(config, { http }).detailAction(
       "ipam/prefixes",
       42,
       "available-ips",

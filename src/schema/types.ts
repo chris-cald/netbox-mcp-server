@@ -18,7 +18,7 @@ export type ObjectTypeKey = string;
 export type Operation = "list" | "get" | "create" | "update" | "delete";
 
 /** Schema-confirmed native detail actions available to the semantic action layer. */
-export type DetailActionName = "available-ips" | "available-prefixes";
+export type DetailActionName = "available-ips" | "available-prefixes" | "trace" | "paths";
 export type DetailActionMethod = "get" | "post";
 
 /** A JSON-schema-shaped value made safe to advertise as action metadata. */

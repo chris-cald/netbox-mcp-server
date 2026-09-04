@@ -11,9 +11,9 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 
 import {
-  applicablePrefixActions,
+  applicableSemanticActions,
   boundedSemanticActionMetadata,
-} from "../../actions/ipam-prefix.js";
+} from "../../actions/semantic.js";
 import { handleApiError } from "../../errors.js";
 import type { SchemaProvider } from "../../schema/types.js";
 import {
@@ -76,7 +76,7 @@ export function registerDescribe(server: McpServer, schema: SchemaProvider): voi
         const summary = await resolveType(schema, args.object_type);
         requireOperation(summary, args.operation);
         const described = await schema.describe(summary.object_type, args.operation);
-        const semanticActions = await applicablePrefixActions(
+        const semanticActions = await applicableSemanticActions(
           schema,
           summary.object_type,
         );

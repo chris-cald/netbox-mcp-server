@@ -30,7 +30,7 @@ export interface PaginatedResponse<T> {
  * exposes collection-relative methods rather than arbitrary URLs, so injected
  * implementations retain the same endpoint boundary as the default client.
  */
-export type PrefixDetailAction = "available-ips" | "available-prefixes";
+export type DetailAction = "available-ips" | "available-prefixes" | "trace" | "paths";
 
 export interface NetBoxApi {
   list<T>(
@@ -45,14 +45,11 @@ export interface NetBoxApi {
     body: Record<string, unknown>,
   ): Promise<T>;
   del(endpoint: string, id: number | string): Promise<void>;
-  /**
-   * Invoke one of the two native IPAM prefix availability detail actions.
-   * The action is a closed union, never a caller-supplied path or HTTP method.
-   */
-  prefixDetailAction<T>(
+  /** Invoke a closed semantic detail action; callers never supply a path or method. */
+  detailAction<T>(
     endpoint: string,
     id: number,
-    action: PrefixDetailAction,
+    action: DetailAction,
     method: "get" | "post",
     body?: unknown,
     params?: Record<string, unknown>,
@@ -167,11 +164,11 @@ export class NetBoxClient implements NetBoxApi {
     );
   }
 
-  /** Native, closed IPAM prefix availability detail actions. */
-  async prefixDetailAction<T>(
+  /** Native, closed semantic detail actions. */
+  async detailAction<T>(
     endpoint: string,
     id: number,
-    action: PrefixDetailAction,
+    action: DetailAction,
     method: "get" | "post",
     body: unknown = [],
     params: Record<string, unknown> = {},

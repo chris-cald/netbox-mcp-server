@@ -93,7 +93,7 @@ function assertInjectedApi(dependency: InjectedNetBoxApi): void {
   const api = dependency.api;
   if (
     !api ||
-    ["list", "get", "create", "update", "del", "prefixDetailAction"].some(
+    ["list", "get", "create", "update", "del", "detailAction"].some(
       (method) => typeof api[method as keyof NetBoxApi] !== "function",
     )
   ) {

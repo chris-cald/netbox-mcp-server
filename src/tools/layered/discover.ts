@@ -12,10 +12,10 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 
 import {
-  applicablePrefixActions,
+  applicableSemanticActions,
   boundedSemanticActionMetadata,
   type SemanticActionMetadata,
-} from "../../actions/ipam-prefix.js";
+} from "../../actions/semantic.js";
 import { CHARACTER_LIMIT } from "../../constants.js";
 import { handleApiError } from "../../errors.js";
 import { buildListPayload } from "../../formatting.js";
@@ -99,7 +99,7 @@ export function registerDiscover(server: McpServer, schema: SchemaProvider): voi
               async (type) =>
                 [
                   type.object_type,
-                  await applicablePrefixActions(schema, type.object_type),
+                  await applicableSemanticActions(schema, type.object_type),
                 ] as const,
             ),
           ),

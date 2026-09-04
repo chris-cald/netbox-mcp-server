@@ -24,16 +24,16 @@ const prefix: ObjectTypeSummary = {
   summary: "Prefix objects (ipam/prefixes).",
 };
 
-function api(): NetBoxApi & { prefixDetailAction: ReturnType<typeof vi.fn> } {
-  const prefixDetailAction = vi.fn();
+function api(): NetBoxApi & { detailAction: ReturnType<typeof vi.fn> } {
+  const detailAction = vi.fn();
   return {
     list: vi.fn(),
     get: vi.fn(),
     create: vi.fn(),
     update: vi.fn(),
     del: vi.fn(),
-    prefixDetailAction,
-  } as NetBoxApi & { prefixDetailAction: ReturnType<typeof vi.fn> };
+    detailAction,
+  } as NetBoxApi & { detailAction: ReturnType<typeof vi.fn> };
 }
 
 async function connect(schema: SchemaProvider, clientApi: NetBoxApi): Promise<Client> {
@@ -198,7 +198,7 @@ describe("IPAM prefix controlled semantic actions", () => {
         },
       });
       expect(resultText(rejected)).toContain("query.brief is required");
-      expect(http.prefixDetailAction).not.toHaveBeenCalled();
+      expect(http.detailAction).not.toHaveBeenCalled();
     } finally {
       await client.close();
     }
@@ -233,7 +233,7 @@ describe("IPAM prefix controlled semantic actions", () => {
         arguments: { operation: "not.an.action", target: 7, input: {} },
       });
       expect(resultText(unknown)).toContain("Invalid enum value");
-      expect(http.prefixDetailAction).not.toHaveBeenCalled();
+      expect(http.detailAction).not.toHaveBeenCalled();
     } finally {
       await client.close();
     }
@@ -260,7 +260,7 @@ describe("IPAM prefix controlled semantic actions", () => {
         },
       });
       expect(resultText(invalid)).toContain("not available");
-      expect(malformedHttp.prefixDetailAction).not.toHaveBeenCalled();
+      expect(malformedHttp.detailAction).not.toHaveBeenCalled();
     } finally {
       await malformedClient.close();
     }
@@ -286,7 +286,7 @@ describe("IPAM prefix controlled semantic actions", () => {
         },
       });
       expect(resultText(rejected)).toContain("not available");
-      expect(nonJsonHttp.prefixDetailAction).not.toHaveBeenCalled();
+      expect(nonJsonHttp.detailAction).not.toHaveBeenCalled();
     } finally {
       await nonJsonClient.close();
     }
@@ -333,7 +333,7 @@ describe("IPAM prefix controlled semantic actions", () => {
         },
       });
       expect(resultText(response)).toContain("not available");
-      expect(http.prefixDetailAction).not.toHaveBeenCalled();
+      expect(http.detailAction).not.toHaveBeenCalled();
     } finally {
       await client.close();
     }
@@ -375,7 +375,7 @@ describe("IPAM prefix controlled semantic actions", () => {
         },
       });
       expect(resultText(response)).toContain("not available");
-      expect(http.prefixDetailAction).not.toHaveBeenCalled();
+      expect(http.detailAction).not.toHaveBeenCalled();
     } finally {
       await client.close();
     }
@@ -383,7 +383,7 @@ describe("IPAM prefix controlled semantic actions", () => {
 
   it("sends exact schema-derived query/body envelopes and reports bounded arrays", async () => {
     const http = api();
-    http.prefixDetailAction
+    http.detailAction
       .mockResolvedValueOnce(
         Array.from({ length: 60 }, (_, id) => ({
           address: `192.0.2.${id}`,
@@ -402,7 +402,7 @@ describe("IPAM prefix controlled semantic actions", () => {
           input: { query: { brief: true, fields: "id,address" } },
         },
       });
-      expect(http.prefixDetailAction).toHaveBeenLastCalledWith(
+      expect(http.detailAction).toHaveBeenLastCalledWith(
         "ipam/prefixes",
         7,
         "available-ips",
@@ -424,7 +424,7 @@ describe("IPAM prefix controlled semantic actions", () => {
           input: { data: [{ prefix_length: 31 }] },
         },
       });
-      expect(http.prefixDetailAction).toHaveBeenLastCalledWith(
+      expect(http.detailAction).toHaveBeenLastCalledWith(
         "ipam/prefixes",
         7,
         "available-ips",
@@ -462,7 +462,7 @@ describe("IPAM prefix controlled semantic actions", () => {
         },
       });
       expect(resultText(oversizedAllocation)).toContain("25 KiB");
-      expect(http.prefixDetailAction).toHaveBeenCalledTimes(2);
+      expect(http.detailAction).toHaveBeenCalledTimes(2);
     } finally {
       await client.close();
     }
@@ -487,7 +487,7 @@ describe("IPAM prefix controlled semantic actions", () => {
           },
         });
         expect(resultText(response)).toContain("NetBox 4.6.x");
-        expect(http.prefixDetailAction).not.toHaveBeenCalled();
+        expect(http.detailAction).not.toHaveBeenCalled();
       } finally {
         await client.close();
       }
@@ -500,7 +500,7 @@ describe("IPAM prefix controlled semantic actions", () => {
     if (!availableIp) throw new Error("fixture unexpectedly lacks AvailableIP schema");
     availableIp.description = "x".repeat(26_000);
     const http = api();
-    http.prefixDetailAction.mockResolvedValue([]);
+    http.detailAction.mockResolvedValue([]);
     const client = await connect(
       createSchemaProviderFromDocument(oversizedMetadata),
       http,
@@ -569,7 +569,7 @@ describe("IPAM prefix controlled semantic actions", () => {
           },
         });
         expect(resultText(response)).toContain("not available");
-        expect(http.prefixDetailAction).not.toHaveBeenCalled();
+        expect(http.detailAction).not.toHaveBeenCalled();
       } finally {
         await client.close();
       }
@@ -578,7 +578,7 @@ describe("IPAM prefix controlled semantic actions", () => {
 
   it("rejects native action responses whose items omit schema-required fields", async () => {
     const http = api();
-    http.prefixDetailAction.mockResolvedValue([{ address: "192.0.2.1", vrf: null }]);
+    http.detailAction.mockResolvedValue([{ address: "192.0.2.1", vrf: null }]);
     const client = await connect(createSchemaProviderFromDocument(fixture), http);
     try {
       const response = await client.callTool({
@@ -590,7 +590,7 @@ describe("IPAM prefix controlled semantic actions", () => {
         },
       });
       expect(resultText(response)).toContain("response[0].family is required");
-      expect(http.prefixDetailAction).toHaveBeenCalledOnce();
+      expect(http.detailAction).toHaveBeenCalledOnce();
     } finally {
       await client.close();
     }
@@ -598,7 +598,7 @@ describe("IPAM prefix controlled semantic actions", () => {
 
   it("rejects role:null when the captured response contract declares an object", async () => {
     const http = api();
-    http.prefixDetailAction.mockResolvedValue([
+    http.detailAction.mockResolvedValue([
       {
         address: "192.0.2.1/32",
         assigned_object: null,
@@ -624,7 +624,7 @@ describe("IPAM prefix controlled semantic actions", () => {
         },
       });
       expect(resultText(response)).toContain("response[0].role must be an object");
-      expect(http.prefixDetailAction).toHaveBeenCalledOnce();
+      expect(http.detailAction).toHaveBeenCalledOnce();
     } finally {
       await client.close();
     }
@@ -675,7 +675,7 @@ describe("IPAM prefix controlled semantic actions", () => {
       const text = resultText(response);
       expect(text.length).toBeLessThanOrEqual(1_000);
       expect(text).not.toContain(callerKey);
-      expect(http.prefixDetailAction).not.toHaveBeenCalled();
+      expect(http.detailAction).not.toHaveBeenCalled();
     } finally {
       await client.close();
     }
@@ -683,7 +683,7 @@ describe("IPAM prefix controlled semantic actions", () => {
 
   it("surfaces allocation conflicts once without retrying", async () => {
     const http = api();
-    http.prefixDetailAction.mockRejectedValue(new Error("409 allocation conflict"));
+    http.detailAction.mockRejectedValue(new Error("409 allocation conflict"));
     const client = await connect(createSchemaProviderFromDocument(fixture), http);
     try {
       const result = await client.callTool({
@@ -695,7 +695,7 @@ describe("IPAM prefix controlled semantic actions", () => {
         },
       });
       expect(resultText(result)).toContain("safe upstream error");
-      expect(http.prefixDetailAction).toHaveBeenCalledOnce();
+      expect(http.detailAction).toHaveBeenCalledOnce();
     } finally {
       await client.close();
     }
