@@ -62,7 +62,7 @@ The server registers exactly six tools, on every install, regardless of configur
 | `netbox_discover`      | 1     | Lists the object types this instance supports, and the operations each allows.                                             |
 | `netbox_describe`      | 2     | Explains one object type: required fields, optional fields, read-only fields, accepted filters, and what must exist first. |
 | `netbox_read`          | 3     | `list` (filtered, paginated) or `get` (one object by id). Never modifies anything.                                         |
-| `netbox_write`         | 3     | `create`, `update` or `delete`. Changes NetBox records.                                                                    |
+| `netbox_write`         | 3     | Single `create`, `update` or `delete`, plus schema-confirmed native bulk create/update/delete. Changes NetBox records.     |
 | `netbox_invoke`        | 3     | Runs schema-confirmed, controlled IPAM prefix availability/allocation and DCIM cable trace/path actions.                   |
 
 **The object types those tools address are not fixed.** They are derived at runtime from
@@ -823,7 +823,7 @@ more than looking it up first.
    values, the read-only fields you must not send, and the object types that must already
    exist.
 3. **`netbox_read`** — `list` (with `filters`, `limit`, `offset`) or `get` (by `id`).
-4. **`netbox_write`** — `create`, `update` or `delete`.
+4. **`netbox_write`** — single `create`, `update` or `delete`; schema-confirmed native bulk operations use `items`.
 
 `netbox_describe` before `netbox_write` is not optional courtesy — `netbox_write`
 validates `data` against the instance's schema locally and refuses to send a call that
@@ -873,7 +873,22 @@ object changed, so re-read it rather than retrying with a guess.
 and prefixes. The `confirm` gate exists to force a read-then-delete, not to make deleting
 safe.
 
-### 8.6 What happens when the token cannot write
+### 8.6 Native bulk writes
+
+`netbox_write` also exposes `bulk_create`, `bulk_update`, and `bulk_delete` through the
+instance's native collection POST, PATCH, and DELETE endpoints. They are unavailable unless
+that instance's OpenAPI document proves the exact collection method, JSON-array request and
+success response. `items` is locally checked against that schema; a request is limited to
+100 items and 25 KiB of UTF-8 JSON.
+
+`bulk_update` and `bulk_delete` must first be called without `confirm`. The refusal issues a
+random token bound to the exact operation, object type, and canonical payload. After human
+confirmation, pass it back within five minutes. It is consumed before the one-shot native
+dispatch — including when dispatch fails — and a changed payload, expired token, or retry is
+refused. No bulk request is automatically retried. Bulk delete can cascade, so confirm with
+the human before requesting its token.
+
+### 8.7 What happens when the token cannot write
 
 Nothing in the server prevents a write attempt. If the token has `write_enabled` off, or
 lacks the object permission, **NetBox** answers `403 Forbidden` and the tool surfaces
@@ -972,6 +987,10 @@ and do not describe an install as restricted because one of them is present.
   `confirm` before it will delete anything (section 8.5), which forces a read first — but
   that is a guard against deleting the _wrong_ object, not a reason to delete casually.
   Confirm with the human first, in words, naming the object.
+- **Bulk updates and deletes need two calls.** First call without `confirm` to receive a
+  random payload-bound token; after confirming the exact change with the user, use it once
+  within five minutes. It is not reusable after an error, so request a new token before any
+  retry. Bulk delete can cascade.
 - **NetBox is a source of truth, not the network.** Writing to it changes documentation,
   not device configuration — but downstream automation may read it and act on it.
 - **The tool surface follows the instance.** Which object types exist depends on the

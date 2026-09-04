@@ -15,6 +15,8 @@
  *    fail here rather than at the database.
  */
 
+import { randomBytes } from "node:crypto";
+
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
@@ -22,6 +24,8 @@ import { z } from "zod";
 import { getClient, type NetBoxApiProvider } from "../../client.js";
 import { renderObjectMarkdown, toDisplayString } from "../../formatting.js";
 import type {
+  BulkOperation,
+  BulkOperationContract,
   DescribeResult,
   ObjectTypeSummary,
   SchemaProvider,
@@ -37,7 +41,7 @@ import {
   textResult,
   toErrorText,
 } from "./shared.js";
-import { validateWriteData } from "./validate.js";
+import { validateBulkItems, validateWriteData } from "./validate.js";
 
 const Input = {
   object_type: z
@@ -48,9 +52,9 @@ const Input = {
       "Object type key from netbox_discover, e.g. 'dcim.device'. Not a path and not a URL: the endpoint is resolved from the registry.",
     ),
   operation: z
-    .enum(["create", "update", "delete"])
+    .enum(["create", "update", "delete", "bulk_create", "bulk_update", "bulk_delete"])
     .describe(
-      "'create' makes a new object, 'update' patches an existing one, 'delete' removes it permanently.",
+      "'create' makes one object, 'update' patches one object, 'delete' removes one object; bulk operations use schema-confirmed native collection writes.",
     ),
   id: z
     .number()
@@ -64,29 +68,37 @@ const Input = {
     .describe(
       "Field values. Required for 'create' and 'update'. Use exactly the field names netbox_describe returned; unknown fields, read-only fields and bad enum values are rejected locally before any request is sent. For 'update', send only the fields you are changing.",
     ),
+  items: z
+    .array(z.record(z.string(), z.unknown()))
+    .min(1)
+    .optional()
+    .describe(
+      "Required for bulk_create, bulk_update and bulk_delete. Items are validated against the native collection operation's OpenAPI request schema before sending.",
+    ),
   confirm: z
     .string()
     .optional()
     .describe(
-      "Required for 'delete': the object's current 'display' value, exactly as netbox_read returned it. If it does not match, the delete is refused.",
+      "Required for 'delete', 'bulk_update' and 'bulk_delete'. Bulk confirmation is the exact payload-bound token returned by a prior refused call.",
     ),
 };
 
-const DESCRIPTION = `Creates, updates or deletes a NetBox object. This changes the source of truth for someone's network — treat it accordingly.
+const DESCRIPTION = `Creates, updates or deletes NetBox objects.
 
-Call netbox_discover first (for the object_type), then netbox_describe with the operation you intend (for the fields and prerequisites), then this. Skipping describe does not save a round-trip: this tool validates 'data' against the instance's schema before sending anything, and a rejection returns that same description.
+Use netbox_discover and netbox_describe before writing. Single create/update use data; update is partial. Single delete requires the current display as confirm.
 
-Args:
-  - object_type (string, required)  key from netbox_discover.
-  - operation   (string, required)  'create' | 'update' | 'delete'.
-  - id          (number)            required for 'update' and 'delete'.
-  - data        (object)            field values; required for 'create' and 'update'.
-  - confirm     (string)            required for 'delete'.
+Native bulk_create, bulk_update and bulk_delete use items. They run only when the instance OpenAPI schema confirms the collection path, method, JSON array request and success response. bulk_update uses PATCH, never collection PUT. At most 100 items and 25 KiB are accepted. bulk_update and bulk_delete first refuse and issue a random, one-use, five-minute payload-bound confirm token; the confirmed request is sent once with no retry. Bulk deletes can cascade and cannot be undone.`;
 
-Rules that are enforced, not advisory:
-  - References are ids. A device needs its site, device_type and role to exist already; create or look them up first (netbox_describe lists them under 'must exist first').
-  - 'update' is a partial write. Only the fields present in 'data' change; everything else is left alone.
-  - 'delete' requires 'confirm' to equal the object's current 'display' value. Read the object first (netbox_read with operation='get'), copy the 'display' value, and pass it. A mismatch refuses the delete and shows both values. Deletes cascade in NetBox — removing a site can remove its racks, devices and prefixes — and cannot be undone, so confirm with the user before calling.`;
+const MAX_BULK_ITEMS = 100;
+const BULK_CONFIRMATION_TTL_MS = 5 * 60_000;
+const MAX_BULK_CONFIRMATIONS = 100;
+
+type BulkConfirmationGrant = {
+  operation: BulkOperation;
+  objectType: string;
+  payload: string;
+  expiresAt: number;
+};
 
 export function registerWrite(
   server: McpServer,
@@ -95,6 +107,8 @@ export function registerWrite(
   sanitizeApiError?: ApiErrorSanitizer,
 ): void {
   const errorSanitizer = requireApiErrorSanitizer(api, sanitizeApiError);
+  // ponytail: bounded per-server grants; persistent confirmation needs an audited store.
+  const bulkConfirmations = new Map<string, BulkConfirmationGrant>();
   server.registerTool(
     "netbox_write",
     {
@@ -111,8 +125,18 @@ export function registerWrite(
     async (args): Promise<CallToolResult> => {
       try {
         const summary = await resolveType(schema, args.object_type);
+        if (isBulkOperation(args.operation)) {
+          return await runBulkWrite(
+            summary,
+            args.operation,
+            args.items,
+            args.confirm,
+            schema,
+            api,
+            bulkConfirmations,
+          );
+        }
         requireOperation(summary, args.operation);
-
         if (args.operation === "delete") {
           return await runDelete(summary, args.id, args.confirm, api);
         }
@@ -122,6 +146,161 @@ export function registerWrite(
       }
     },
   );
+}
+
+function isBulkOperation(operation: string): operation is BulkOperation {
+  return (
+    operation === "bulk_create" ||
+    operation === "bulk_update" ||
+    operation === "bulk_delete"
+  );
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  if (value && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableJson(record[key])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+function issueBulkConfirmation(
+  grants: Map<string, BulkConfirmationGrant>,
+  operation: BulkOperation,
+  objectType: string,
+  payload: string,
+): string {
+  const now = Date.now();
+  for (const [token, grant] of grants) {
+    if (grant.expiresAt <= now) grants.delete(token);
+  }
+  if (grants.size >= MAX_BULK_CONFIRMATIONS) {
+    const oldest = grants.keys().next().value;
+    if (oldest) grants.delete(oldest);
+  }
+  const token = randomBytes(32).toString("base64url");
+  grants.set(token, {
+    operation,
+    objectType,
+    payload,
+    expiresAt: now + BULK_CONFIRMATION_TTL_MS,
+  });
+  return token;
+}
+
+function consumeBulkConfirmation(
+  grants: Map<string, BulkConfirmationGrant>,
+  token: string,
+  operation: BulkOperation,
+  objectType: string,
+  payload: string,
+): boolean {
+  const grant = grants.get(token);
+  if (!grant) return false;
+  grants.delete(token);
+  return (
+    grant.expiresAt > Date.now() &&
+    grant.operation === operation &&
+    grant.objectType === objectType &&
+    grant.payload === payload
+  );
+}
+
+function confirmationRequired(operation: BulkOperation): boolean {
+  return operation === "bulk_update" || operation === "bulk_delete";
+}
+
+function bulkResult(
+  summary: ObjectTypeSummary,
+  operation: BulkOperation,
+  contract: BulkOperationContract,
+  nativeResponse: unknown,
+  count: number,
+): CallToolResult {
+  const result =
+    contract.response_content === "json"
+      ? Array.isArray(nativeResponse)
+        ? nativeResponse
+        : [nativeResponse]
+      : [];
+  return textResult(
+    `${operation === "bulk_delete" ? "Deleted" : operation === "bulk_update" ? "Updated" : "Created"} ${count} ${summary.label} object(s) with NetBox's native bulk operation.`,
+    { object_type: summary.object_type, operation, count, result },
+  );
+}
+
+async function runBulkWrite(
+  summary: ObjectTypeSummary,
+  operation: BulkOperation,
+  items: Record<string, unknown>[] | undefined,
+  confirm: string | undefined,
+  schema: SchemaProvider,
+  api: NetBoxApiProvider,
+  bulkConfirmations: Map<string, BulkConfirmationGrant>,
+): Promise<CallToolResult> {
+  if (!items)
+    return errorResult(`Error: '${operation}' needs a non-empty 'items' array.`);
+  const contract = await schema.bulkOperationContract?.(summary.object_type, operation);
+  if (!contract) {
+    return errorResult(
+      `Error: '${operation}' is not available for ${summary.object_type}. The instance schema must confirm its collection path, method, JSON array request and successful response before anything is sent.`,
+    );
+  }
+  if (items.length > MAX_BULK_ITEMS) {
+    return errorResult(
+      `Error: '${operation}' has ${items.length} items; native bulk operations allow at most ${MAX_BULK_ITEMS} items per request — nothing was sent to NetBox.`,
+    );
+  }
+  const body = stableJson(items);
+  if (Buffer.byteLength(body, "utf8") > 25 * 1024) {
+    return errorResult(
+      `Error: '${operation}' items exceed the 25 KiB native bulk request limit — nothing was sent to NetBox. Split the confirmed target set into smaller batches.`,
+    );
+  }
+  const validation = validateBulkItems(items, contract.request_schema);
+  if (!validation.ok) {
+    return errorResult(
+      `Error: '${operation}' rejected locally — nothing was sent to NetBox.\n` +
+        validation.errors.map((error) => `  - ${error}`).join("\n"),
+    );
+  }
+  if (confirmationRequired(operation)) {
+    if (confirm === undefined) {
+      const token = issueBulkConfirmation(
+        bulkConfirmations,
+        operation,
+        summary.object_type,
+        body,
+      );
+      return errorResult(
+        `Error: '${operation}' needs 'confirm'. This refusal issued a random token for this exact operation, object type and payload. Confirm with the user, then call again within five minutes with confirm="${token}". The token is one-use, including if dispatch fails.`,
+      );
+    }
+    if (
+      !consumeBulkConfirmation(
+        bulkConfirmations,
+        confirm.trim(),
+        operation,
+        summary.object_type,
+        body,
+      )
+    ) {
+      return errorResult(
+        `Error: ${operation} refused — confirmation is invalid, expired, already used or does not match this exact operation, object type and payload. Request a new confirmation token before retrying.`,
+      );
+    }
+  }
+  // Native bulk mutations are one-shot. Retrying can apply a changed target set.
+  const nativeResponse = await api().collectionAction(
+    summary.endpoint,
+    contract.method,
+    items,
+  );
+  return bulkResult(summary, operation, contract, nativeResponse, items.length);
 }
 
 async function runWrite(

@@ -200,6 +200,113 @@ describe.skipIf(process.env.NETBOX_E2E !== "1")(
 
             const persisted = await persistedResponse.json();
             expect(persisted).toEqual(allocated);
+
+            const bulkBase = `mcp-bulk-${prefix.id}-${Date.now()}`;
+            const bulkItems = [1, 2].map((number) => ({
+              name: `${bulkBase}-${number}`,
+              slug: `${bulkBase}-${number}`,
+            }));
+            const bulkCreated = await mcp.client.callTool({
+              name: "netbox_write",
+              arguments: {
+                object_type: "dcim.site",
+                operation: "bulk_create",
+                items: bulkItems,
+              },
+            });
+            const createdSites = (
+              bulkCreated as { structuredContent?: { result?: unknown } }
+            ).structuredContent?.result;
+            expect(Array.isArray(createdSites)).toBe(true);
+            if (!Array.isArray(createdSites) || createdSites.length !== bulkItems.length)
+              throw new Error("Native bulk POST did not return both isolated sites.");
+            const siteIds = createdSites.map((site) => (site as { id?: unknown }).id);
+            expect(siteIds.every((id) => Number.isInteger(id))).toBe(true);
+            if (!siteIds.every((id): id is number => typeof id === "number"))
+              throw new Error("Native bulk POST returned a site without an id.");
+
+            const changedDescription = `updated by ${bulkBase}`;
+            const bulkPatchArgs = {
+              object_type: "dcim.site",
+              operation: "bulk_update",
+              items: siteIds.map((id) => ({ id, description: changedDescription })),
+            };
+            const patchPreflight = await mcp.client.callTool({
+              name: "netbox_write",
+              arguments: bulkPatchArgs,
+            });
+            const patchText = (
+              patchPreflight as { content?: Array<{ text?: string }> }
+            ).content
+              ?.map(({ text }) => text ?? "")
+              .join("\n");
+            const patchConfirm = /confirm="([^"]+)"/.exec(patchText ?? "")?.[1];
+            expect(patchConfirm).toBeDefined();
+
+            const patched = await mcp.client.callTool({
+              name: "netbox_write",
+              arguments: { ...bulkPatchArgs, confirm: patchConfirm },
+            });
+            expect((patched as { isError?: boolean }).isError).not.toBe(true);
+            const reusedPatchToken = await mcp.client.callTool({
+              name: "netbox_write",
+              arguments: { ...bulkPatchArgs, confirm: patchConfirm },
+            });
+            expect((reusedPatchToken as { isError?: boolean }).isError).toBe(true);
+            const persistedSites = await Promise.all(
+              siteIds.map(async (id) => {
+                const response = await fetch(new URL(`/api/dcim/sites/${id}/`, url), {
+                  headers,
+                });
+                expect(response.status).toBe(200);
+                return response.json();
+              }),
+            );
+            expect(persistedSites).toEqual(
+              expect.arrayContaining([
+                expect.objectContaining({
+                  id: siteIds[0],
+                  description: changedDescription,
+                }),
+                expect.objectContaining({
+                  id: siteIds[1],
+                  description: changedDescription,
+                }),
+              ]),
+            );
+
+            const bulkDeleteArgs = {
+              object_type: "dcim.site",
+              operation: "bulk_delete",
+              // NetBox's native DELETE request schema reuses SiteRequest, so
+              // provide its required name/slug alongside the target id.
+              items: siteIds.map((id, index) => ({ id, ...bulkItems[index] })),
+            };
+            const deletePreflight = await mcp.client.callTool({
+              name: "netbox_write",
+              arguments: bulkDeleteArgs,
+            });
+            const deleteText = (
+              deletePreflight as { content?: Array<{ text?: string }> }
+            ).content
+              ?.map(({ text }) => text ?? "")
+              .join("\n");
+            const deleteConfirm = /confirm="([^"]+)"/.exec(deleteText ?? "")?.[1];
+            expect(deleteConfirm, deleteText).toBeDefined();
+            const deleted = await mcp.client.callTool({
+              name: "netbox_write",
+              arguments: { ...bulkDeleteArgs, confirm: deleteConfirm },
+            });
+            expect((deleted as { isError?: boolean }).isError).not.toBe(true);
+            const deletedResponses = await Promise.all(
+              siteIds.map((id) =>
+                fetch(new URL(`/api/dcim/sites/${id}/`, url), { headers }),
+              ),
+            );
+            expect(deletedResponses.map((response) => response.status)).toEqual([
+              404, 404,
+            ]);
+            // The fixture tears down its isolated container and volumes even if this test fails.
           } finally {
             await mcp.close();
           }

@@ -23,6 +23,7 @@ function api(): NetBoxApi & { detailAction: ReturnType<typeof vi.fn> } {
     create: vi.fn(),
     update: vi.fn(),
     del: vi.fn(),
+    collectionAction: vi.fn(),
     detailAction,
   } as NetBoxApi & { detailAction: ReturnType<typeof vi.fn> };
 }

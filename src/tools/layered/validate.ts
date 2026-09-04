@@ -7,7 +7,11 @@
  * here is cheaper, more specific, and cannot leak.
  */
 
-import type { DescribeResult, FieldSpec } from "../../schema/types.js";
+import type {
+  DescribeResult,
+  DetailActionSchema,
+  FieldSpec,
+} from "../../schema/types.js";
 import { writableFields } from "./shared.js";
 
 export interface ValidationOutcome {
@@ -155,4 +159,115 @@ function describeValue(value: unknown): string {
 
 function truncate(value: string): string {
   return value.length > 60 ? `${value.slice(0, 60)}…` : value;
+}
+
+/** Validate a native bulk request from its own OpenAPI array schema. */
+export function validateBulkItems(
+  items: Record<string, unknown>[],
+  requestSchema: DetailActionSchema,
+): ValidationOutcome {
+  if (requestSchema.type !== "array" || !requestSchema.items) {
+    return {
+      ok: false,
+      errors: ["The advertised bulk request schema is not an array of items."],
+    };
+  }
+  const errors = items.flatMap((item, index) =>
+    validateSchema(item, requestSchema.items as DetailActionSchema, `items[${index}]`),
+  );
+  return { ok: errors.length === 0, errors };
+}
+
+function validateSchema(
+  value: unknown,
+  schema: DetailActionSchema,
+  path: string,
+): string[] {
+  if (value === null) return schema.nullable ? [] : [`${path} is not nullable.`];
+  if (schema.oneOf?.length) {
+    const matches = schema.oneOf.filter(
+      (member) => validateSchema(value, member, path).length === 0,
+    ).length;
+    if (matches !== 1) return [`${path} must match exactly one allowed value.`];
+  }
+  if (
+    schema.anyOf?.length &&
+    !schema.anyOf.some((member) => validateSchema(value, member, path).length === 0)
+  ) {
+    return [`${path} does not match any allowed value.`];
+  }
+  const allOfErrors =
+    schema.allOf?.flatMap((member) => validateSchema(value, member, path)) ?? [];
+  if (allOfErrors.length) return allOfErrors;
+  if (schema.enum && !schema.enum.some((member) => member === value)) {
+    return [`${path} must be one of: ${schema.enum.map(String).join(", ")}.`];
+  }
+  if (
+    schema.type === "integer" &&
+    (typeof value !== "number" || !Number.isInteger(value) || !Number.isFinite(value))
+  ) {
+    return [`${path} must be an integer.`];
+  }
+  if (schema.type === "number" && (typeof value !== "number" || !Number.isFinite(value)))
+    return [`${path} must be a number.`];
+  if (schema.type === "string" && typeof value !== "string")
+    return [`${path} must be a string.`];
+  if (typeof value === "number") {
+    if (schema.minimum !== undefined && value < schema.minimum)
+      return [`${path} must be at least ${schema.minimum}.`];
+    if (schema.maximum !== undefined && value > schema.maximum)
+      return [`${path} must be at most ${schema.maximum}.`];
+  }
+  if (typeof value === "string") {
+    if (schema.minLength !== undefined && value.length < schema.minLength)
+      return [`${path} must be at least ${schema.minLength} character(s).`];
+    if (schema.maxLength !== undefined && value.length > schema.maxLength)
+      return [`${path} must be at most ${schema.maxLength} character(s).`];
+  }
+  if (schema.type === "boolean" && typeof value !== "boolean")
+    return [`${path} must be true or false.`];
+  if (schema.type === "array") {
+    if (!Array.isArray(value)) return [`${path} must be an array.`];
+    const itemSchema = schema.items;
+    return itemSchema
+      ? value.flatMap((item, index) =>
+          validateSchema(item, itemSchema, `${path}[${index}]`),
+        )
+      : [];
+  }
+  if (schema.type !== "object") return [];
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return [`${path} must be an object.`];
+  }
+  const record = value as Record<string, unknown>;
+  const properties = schema.properties ?? {};
+  const errors: string[] = [];
+  for (const required of schema.required ?? []) {
+    if (
+      record[required] === undefined ||
+      record[required] === null ||
+      record[required] === ""
+    ) {
+      errors.push(`${path}.${required} is required.`);
+    }
+  }
+  for (const [name, item] of Object.entries(record)) {
+    const property = properties[name];
+    if (!property) {
+      if (schema.additionalProperties === false) {
+        errors.push(`${path}.${name} is not an accepted field.`);
+      } else if (typeof schema.additionalProperties === "object") {
+        errors.push(
+          ...validateSchema(item, schema.additionalProperties, `${path}.${name}`),
+        );
+      }
+      continue;
+    }
+    if (property.readOnly) {
+      errors.push(`${path}.${name} is read-only.`);
+      continue;
+    }
+    errors.push(...validateSchema(item, property, `${path}.${name}`));
+  }
+  return errors;
 }

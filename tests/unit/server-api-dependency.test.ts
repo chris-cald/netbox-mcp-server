@@ -58,6 +58,7 @@ function api() {
       create: vi.fn(),
       update: vi.fn(),
       del: vi.fn(),
+      collectionAction: vi.fn(),
       detailAction: vi.fn(),
     } satisfies NetBoxApi,
     list,
@@ -140,6 +141,7 @@ describe("server API dependency", () => {
       create: vi.fn(),
       update: vi.fn(),
       del: vi.fn(),
+      collectionAction: vi.fn(),
       detailAction: vi.fn(),
     };
     const server = buildServer(

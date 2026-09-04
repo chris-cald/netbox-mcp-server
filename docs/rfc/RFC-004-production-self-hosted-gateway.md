@@ -52,14 +52,18 @@ disabled, or unavailable operation ids fail locally and are not proxied.
 
 ## Bulk writes
 
-Bulk mutation is deferred. When introduced, it will be a registry operation,
-not an unconstrained array accepted by `netbox_write`. The operation must have
-an explicit item schema, maximum item count and payload size, authorization
-classification, per-item result envelope, deterministic ordering, and an
-idempotency/audit strategy. A validation gate will establish the target
-NetBox version's transaction, partial-failure, and bulk endpoint semantics.
-Until then, callers use the existing single-object writes and their existing
-delete confirmation gate.
+Bulk mutation is a closed schema-derived collection operation, not an
+unconstrained array. `netbox_write` exposes only `bulk_create` (POST),
+`bulk_update` (PATCH), and `bulk_delete` (DELETE) when the connected OpenAPI
+document proves the collection path, JSON-array request, exact method, and
+success response. It locally validates every item, caps a request at 100 items
+and 25 KiB UTF-8 JSON, and sends it once with no automatic retry.
+
+Bulk update and delete first refuse and issue an in-memory random token bound
+to the exact operation, object type, and canonical payload. The token expires
+in five minutes, is consumed before dispatch (including a failed dispatch), and
+cannot authorize a changed payload or retry. This is a human-confirmation gate,
+not an authorization boundary; the NetBox token remains authoritative.
 
 ## Transport and credentials
 
@@ -97,8 +101,10 @@ caller's control.
    trace/front-port/rear-port path GET detail actions, their action-specific
    inputs, target type, and read/write classification before dispatch. Other
    actions remain deferred.
-5. **M5 bulk/deployment:** validate bulk atomicity and partial failures, then
-   publish the deployment and operational model.
+5. **M4 bulk (implemented):** exercise isolated native collection POST/PATCH/
+   DELETE, persisted state, schema validation, limits, and one-use confirmation
+   grants against the disposable fixture. Atomicity and partial-failure semantics
+   remain NetBox-owned and are surfaced without retries.
 
 NetBox's action endpoints, plugin discovery shape, supported version matrix,
 Streamable HTTP SDK details, and OIDC deployment requirements are deliberately

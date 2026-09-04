@@ -31,6 +31,7 @@ export interface PaginatedResponse<T> {
  * implementations retain the same endpoint boundary as the default client.
  */
 export type DetailAction = "available-ips" | "available-prefixes" | "trace" | "paths";
+export type CollectionActionMethod = "post" | "patch" | "delete";
 
 export interface NetBoxApi {
   list<T>(
@@ -45,6 +46,12 @@ export interface NetBoxApi {
     body: Record<string, unknown>,
   ): Promise<T>;
   del(endpoint: string, id: number | string): Promise<void>;
+  /** Invoke a schema-confirmed collection action; callers never supply a path or method. */
+  collectionAction<T>(
+    endpoint: string,
+    method: CollectionActionMethod,
+    body: Record<string, unknown>[],
+  ): Promise<T>;
   /** Invoke a closed semantic detail action; callers never supply a path or method. */
   detailAction<T>(
     endpoint: string,
@@ -162,6 +169,22 @@ export class NetBoxClient implements NetBoxApi {
         headers: { Authorization: authorization },
       }),
     );
+  }
+
+  /** Native collection writes. These calls are deliberately one-shot: no automatic retry. */
+  async collectionAction<T>(
+    endpoint: string,
+    method: CollectionActionMethod,
+    body: Record<string, unknown>[],
+  ): Promise<T> {
+    const response = await this.request((authorization) => {
+      const path = `/${endpoint}/`;
+      const config = { headers: { Authorization: authorization } };
+      if (method === "post") return this.http.post(path, body, config);
+      if (method === "patch") return this.http.patch(path, body, config);
+      return this.http.delete(path, { ...config, data: body });
+    });
+    return response.data as T;
   }
 
   /** Native, closed semantic detail actions. */

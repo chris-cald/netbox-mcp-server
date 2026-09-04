@@ -22,8 +22,10 @@ import {
   type OperationObject,
   type ParameterObject,
 } from "./openapi.js";
-import { buildRegistry, type SchemaRegistry } from "./registry.js";
+import { buildRegistry, type RegistryEntry, type SchemaRegistry } from "./registry.js";
 import {
+  type BulkOperation,
+  type BulkOperationContract,
   type DescribeResult,
   type DetailActionContract,
   type DetailActionMethod,
@@ -129,6 +131,7 @@ function schemaMetadata(
     ...(resolved.format ? { format: resolved.format } : {}),
     ...(resolved.description ? { description: resolved.description } : {}),
     ...(resolved.nullable ? { nullable: true } : {}),
+    ...(resolved.readOnly ? { readOnly: true } : {}),
     ...(resolved.enum ? { enum: [...resolved.enum] } : {}),
     ...(resolved.default !== undefined ? { default: resolved.default } : {}),
     ...(resolved.minimum !== undefined ? { minimum: resolved.minimum } : {}),
@@ -143,6 +146,70 @@ function schemaMetadata(
     ...(anyOf && anyOf.length > 0 ? { anyOf } : {}),
     ...(allOf && allOf.length > 0 ? { allOf } : {}),
   };
+}
+
+function arrayRequestSchema(
+  document: OpenApiDocument,
+  node: JsonSchemaNode | undefined,
+  depth = 0,
+): JsonSchemaNode | undefined {
+  const resolved = deref(document, node);
+  if (!resolved || depth >= 8) return undefined;
+  if (resolved.type === "array" || resolved.items !== undefined) return resolved;
+  for (const member of [...(resolved.oneOf ?? []), ...(resolved.anyOf ?? [])]) {
+    const array = arrayRequestSchema(document, member, depth + 1);
+    if (array) return array;
+  }
+  return undefined;
+}
+
+function bulkContract(
+  document: OpenApiDocument,
+  operation: OperationObject | undefined,
+  method: BulkOperationContract["method"],
+  status: string,
+): BulkOperationContract | undefined {
+  if (!operation || operation.requestBody?.required !== true) return undefined;
+  const request = arrayRequestSchema(document, jsonRequestSchema(operation));
+  if (!request?.items) return undefined;
+  const requestSchema = schemaMetadata(document, request);
+  const response = operation.responses?.[status];
+  if (!requestSchema || !response) return undefined;
+  const responseSchema = schemaMetadata(
+    document,
+    response.content?.["application/json"]?.schema,
+  );
+  if (method === "delete") {
+    // NetBox's bulk destroy is contractually 204 with no response body.
+    return responseSchema
+      ? undefined
+      : {
+          method,
+          request_schema: requestSchema,
+          response_content: "none",
+        };
+  }
+  return responseSchema
+    ? {
+        method,
+        request_schema: requestSchema,
+        response_content: "json",
+        response_schema: responseSchema,
+      }
+    : undefined;
+}
+
+function collectionBulkContract(
+  document: OpenApiDocument,
+  entry: RegistryEntry,
+  operation: BulkOperation,
+): BulkOperationContract | undefined {
+  // The registry owns collectionPath, so this does not infer a URL from a caller value.
+  if (operation === "bulk_create")
+    return bulkContract(document, entry.collection.post, "post", "201");
+  if (operation === "bulk_update")
+    return bulkContract(document, entry.collection.patch, "patch", "200");
+  return bulkContract(document, entry.collection.delete, "delete", "204");
 }
 
 function actionContract(
@@ -237,6 +304,16 @@ function providerFromRegistry(
         );
       }
       return describeObjectType(registry, entry, operation);
+    },
+
+    async bulkOperationContract(
+      objectType: ObjectTypeKey,
+      operation: BulkOperation,
+    ): Promise<BulkOperationContract | undefined> {
+      const registry = await getRegistry();
+      const entry = registry.types.get(objectType);
+      if (!entry) return undefined;
+      return collectionBulkContract(registry.document, entry, operation);
     },
 
     async supportsDetailAction(

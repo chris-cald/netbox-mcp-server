@@ -17,6 +17,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import type {
+  BulkOperation,
+  BulkOperationContract,
   DescribeResult,
   FieldSpec,
   ObjectTypeSummary,
@@ -30,6 +32,7 @@ const http = vi.hoisted(() => ({
   create: vi.fn(),
   update: vi.fn(),
   del: vi.fn(),
+  collectionAction: vi.fn(),
   raw: vi.fn(),
 }));
 
@@ -85,7 +88,38 @@ const DEVICE_FIELDS: FieldSpec[] = [
   },
 ];
 
-function provider(): SchemaProvider {
+function bulkOperationContract(
+  _objectType: string,
+  operation: BulkOperation,
+): Promise<BulkOperationContract> {
+  return Promise.resolve({
+    method:
+      operation === "bulk_create"
+        ? "post"
+        : operation === "bulk_update"
+          ? "patch"
+          : "delete",
+    request_schema: {
+      type: "array",
+      items: {
+        type: "object",
+        properties: {
+          id: { type: "integer" },
+          name: { type: "string" },
+          status: { type: "string", enum: ["active", "offline"] },
+        },
+        required: operation === "bulk_create" ? ["name"] : ["id"],
+        additionalProperties: false,
+      },
+    },
+    response_content: operation === "bulk_delete" ? "none" : "json",
+    ...(operation === "bulk_delete"
+      ? {}
+      : { response_schema: { type: "array", items: { type: "object" } } }),
+  });
+}
+
+function provider(includeBulk = true): SchemaProvider {
   return {
     version: () => Promise.resolve("4.6.7"),
     listObjectTypes: () => Promise.resolve(TYPES),
@@ -100,12 +134,13 @@ function provider(): SchemaProvider {
         dependsOn: ["dcim.site"],
         notes: ["A device name must be unique within its site."],
       }),
+    ...(includeBulk ? { bulkOperationContract } : {}),
   };
 }
 
-async function connect(): Promise<Client> {
+async function connect(schema: SchemaProvider = provider()): Promise<Client> {
   const server = new McpServer({ name: "test", version: "0.0.0" });
-  registerLayeredTools(server, provider());
+  registerLayeredTools(server, schema);
   const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
   const client = new Client({ name: "test-client", version: "0.0.0" });
   await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
@@ -401,6 +436,134 @@ describe("delete confirmation", () => {
     expect(result.text).toContain("'delete' needs an 'id'");
     expect(http.get).not.toHaveBeenCalled();
     expect(http.del).not.toHaveBeenCalled();
+  });
+});
+
+describe("native bulk writes", () => {
+  it("refuses an unconfirmed collection operation before a request", async () => {
+    const unconfirmed = await connect(provider(false));
+    try {
+      const result = await write(unconfirmed, {
+        object_type: "dcim.device",
+        operation: "bulk_create",
+        items: [{ name: "sw-core-01" }],
+      });
+      expect(result.isError).toBe(true);
+      expect(result.text).toContain("must confirm its collection path");
+      expect(http.collectionAction).not.toHaveBeenCalled();
+    } finally {
+      await unconfirmed.close();
+    }
+  });
+
+  it("uses only the schema-confirmed collection method for a bulk create", async () => {
+    http.collectionAction.mockResolvedValue([{ id: 12, display: "sw-core-01" }]);
+    const result = await write(client, {
+      object_type: "dcim.device",
+      operation: "bulk_create",
+      items: [{ name: "sw-core-01" }],
+    });
+    expect(result.isError).toBe(false);
+    expect(http.collectionAction).toHaveBeenCalledTimes(1);
+    expect(http.collectionAction).toHaveBeenCalledWith("dcim/devices", "post", [
+      { name: "sw-core-01" },
+    ]);
+    expect(result.structured).toMatchObject({
+      object_type: "dcim.device",
+      operation: "bulk_create",
+      result: [{ id: 12, display: "sw-core-01" }],
+    });
+  });
+
+  it("requires a payload-bound confirmation before a bulk update", async () => {
+    const args = {
+      object_type: "dcim.device",
+      operation: "bulk_update",
+      items: [{ id: 12, status: "offline" }],
+    };
+    const refused = await write(client, args);
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toContain("random token for this exact operation");
+    const confirm = /confirm="([^"]+)"/.exec(refused.text)?.[1];
+    expect(confirm).toBeDefined();
+    expect(confirm).not.toContain("bulk_update");
+    expect(http.collectionAction).not.toHaveBeenCalled();
+
+    http.collectionAction.mockResolvedValue([{ id: 12, display: "sw-core-01" }]);
+    const confirmed = await write(client, { ...args, confirm });
+    expect(confirmed.isError).toBe(false);
+    expect(http.collectionAction).toHaveBeenCalledWith(
+      "dcim/devices",
+      "patch",
+      args.items,
+    );
+  });
+
+  it("binds destructive deletion confirmation to the exact payload and never retries", async () => {
+    const args = {
+      object_type: "dcim.device",
+      operation: "bulk_delete",
+      items: [{ id: 12 }],
+    };
+    const refused = await write(client, args);
+    const confirm = /confirm="([^"]+)"/.exec(refused.text)?.[1];
+    expect(confirm).toBeDefined();
+
+    http.collectionAction.mockRejectedValue(new Error("connection reset"));
+    const failed = await write(client, { ...args, confirm });
+    expect(failed.isError).toBe(true);
+    expect(http.collectionAction).toHaveBeenCalledTimes(1);
+
+    http.collectionAction.mockClear();
+    const changedTargets = await write(client, {
+      ...args,
+      items: [{ id: 13 }],
+      confirm,
+    });
+    expect(changedTargets.isError).toBe(true);
+    expect(changedTargets.text).toContain("invalid, expired, already used");
+    expect(http.collectionAction).not.toHaveBeenCalled();
+
+    const retried = await write(client, { ...args, confirm });
+    expect(retried.isError).toBe(true);
+    expect(retried.text).toContain("invalid, expired, already used");
+    expect(http.collectionAction).not.toHaveBeenCalled();
+  });
+
+  it("issues distinct random grants only from refusals and enforces the item limit", async () => {
+    const args = {
+      object_type: "dcim.device",
+      operation: "bulk_update",
+      items: [{ id: 12 }],
+    };
+    const first = await write(client, args);
+    const second = await write(client, args);
+    const firstToken = /confirm="([^"]+)"/.exec(first.text)?.[1];
+    const secondToken = /confirm="([^"]+)"/.exec(second.text)?.[1];
+    expect(firstToken).toBeDefined();
+    expect(secondToken).toBeDefined();
+    expect(firstToken).not.toBe(secondToken);
+
+    const tooMany = await write(client, {
+      ...args,
+      items: Array.from({ length: 101 }, (_, id) => ({ id: id + 1 })),
+    });
+    expect(tooMany.isError).toBe(true);
+    expect(tooMany.text).toContain("at most 100 items");
+    expect(tooMany.text).not.toContain('confirm="');
+    expect(http.collectionAction).not.toHaveBeenCalled();
+  });
+
+  it("rejects invalid bulk items before a request", async () => {
+    const result = await write(client, {
+      object_type: "dcim.device",
+      operation: "bulk_update",
+      items: [{ id: "12", colour: "blue" }],
+    });
+    expect(result.isError).toBe(true);
+    expect(result.text).toContain("items[0].id");
+    expect(result.text).toContain("items[0].colour");
+    expect(http.collectionAction).not.toHaveBeenCalled();
   });
 });
 
