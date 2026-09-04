@@ -188,21 +188,25 @@ The design rationale is
 
 ## Configuration
 
-Set `NETBOX_URL` and exactly one token source. The default transport is stdio; HTTP adds three listener variables.
+Set `NETBOX_URL` and exactly one token source. The default transport is stdio; HTTP is loopback-only until a TLS-terminating proxy/TLS milestone.
 
-| Variable            | Required | Default     | Meaning                                                                                                                                                  |
-| ------------------- | -------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `NETBOX_URL`        | **yes**  | —           | Base URL of your NetBox, e.g. `https://netbox.corp.com`. **Omit `/api`** — the server appends it. A trailing `/` or `/api` is stripped for you.          |
-| `NETBOX_TOKEN`      | one of   | —           | Inline NetBox API token; retained for MCP client configuration and local development.                                                                    |
-| `NETBOX_TOKEN_FILE` | one of   | —           | Path to a readable regular file containing the token. It is mutually exclusive with `NETBOX_TOKEN` and is read before every NetBox request for rotation. |
-| `NETBOX_INSECURE`   | no       | off         | `1`/`true`/`yes`/`y`/`on` skips TLS certificate verification. Prefer installing your internal root CA.                                                   |
-| `NETBOX_TRANSPORT`  | no       | `stdio`     | `stdio` (default) or `http`. HTTP is loopback-only until M6 adds gateway authentication.                                                                 |
-| `NETBOX_HTTP_HOST`  | http     | `127.0.0.1` | Loopback IP address for the HTTP listener; non-loopback values are rejected.                                                                             |
-| `NETBOX_HTTP_PORT`  | http     | `3000`      | HTTP listener port, from 1 through 65535.                                                                                                                |
+| Variable                     | Required    | Default     | Meaning                                                                                                                                                  |
+| ---------------------------- | ----------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NETBOX_URL`                 | **yes**     | —           | Base URL of your NetBox, e.g. `https://netbox.corp.com`. **Omit `/api`** — the server appends it. A trailing `/` or `/api` is stripped for you.          |
+| `NETBOX_TOKEN`               | one of      | —           | Inline NetBox API token; retained for MCP client configuration and local development.                                                                    |
+| `NETBOX_TOKEN_FILE`          | one of      | —           | Path to a readable regular file containing the token. It is mutually exclusive with `NETBOX_TOKEN` and is read before every NetBox request for rotation. |
+| `NETBOX_INSECURE`            | no          | off         | `1`/`true`/`yes`/`y`/`on` skips TLS certificate verification. Prefer installing your internal root CA.                                                   |
+| `NETBOX_TRANSPORT`           | no          | `stdio`     | `stdio` (default) or `http`.                                                                                                                             |
+| `NETBOX_HTTP_HOST`           | http        | `127.0.0.1` | Loopback IP address only (`127.0.0.0/8` or `::1`); public and wildcard binds are rejected.                                                               |
+| `NETBOX_HTTP_PORT`           | http        | `3000`      | HTTP listener port, from 1 through 65535.                                                                                                                |
+| `NETBOX_OIDC_ISSUER`         | no          | —           | Canonical HTTPS issuer for optional loopback Bearer authentication.                                                                                      |
+| `NETBOX_OIDC_JWKS_URL`       | with issuer | —           | Canonical HTTPS JWKS URL for optional loopback Bearer authentication.                                                                                    |
+| `NETBOX_OIDC_AUDIENCE`       | with issuer | —           | Exact nonempty JWT audience for optional loopback Bearer authentication.                                                                                 |
+| `NETBOX_OIDC_REQUIRED_SCOPE` | no          | —           | Optional exact scope required in the JWT `scope` claim.                                                                                                  |
 
 `NETBOX_TOKEN_FILE` is intended for server-side secret mounts. The path and file contents are never exposed through MCP, logs, or errors. A file that is missing, unreadable, not a regular file, or empty fails closed with a secret-safe configuration error. Keep using `NETBOX_TOKEN` in the client config examples above unless your MCP host can securely mount a token file.
 
-With `NETBOX_TRANSPORT=http`, the server exposes the MCP Streamable HTTP endpoint at `/mcp`, plus unauthenticated `GET /healthz` and `GET /readyz`. It rejects public listener addresses until M6 supplies gateway authentication; caller OAuth headers are not used as NetBox credentials.
+With `NETBOX_TRANSPORT=http`, the server exposes the MCP Streamable HTTP endpoint at `/mcp`, plus unauthenticated minimal `GET /healthz` and `GET /readyz` probes, on loopback only. Loopback may remain unauthenticated, or use the complete optional OIDC settings above to validate signed RS256/ES256 Bearer access tokens (issuer, audience, required expiry and subject, and optional scope) on every MCP request. Caller Bearer tokens are never used as NetBox credentials. Public HTTP remains deferred until a TLS-terminating proxy/TLS milestone.
 
 The instance's OpenAPI document is fetched once and cached on disk under
 `$XDG_CACHE_HOME/netbox-mcp` (or `~/.cache/netbox-mcp`), keyed by the NetBox version and
@@ -270,9 +274,9 @@ The honest source is [`docs/compatibility.md`](docs/compatibility.md). In short:
   shapes differ across NetBox versions; please include yours in any bug report. The
   compatibility doc explains how to run the suite against your own instance with a
   read-only token, and what to send back.
-- **stdio by default; loopback Streamable HTTP is available.** `NETBOX_TRANSPORT=http`
-  serves `/mcp` only on a loopback listener until M6 adds gateway authentication, so remote
-  HTTP-only connectors (ChatGPT connectors, Grok connectors) remain unsupported.
+- **stdio by default; Streamable HTTP is loopback-only.** `NETBOX_TRANSPORT=http` serves
+  local clients at `/mcp`; public HTTP remains deferred until a TLS-terminating proxy/TLS
+  milestone, so remote HTTP-only connectors remain unsupported.
 - One plugin has been verified. Others have never been tried.
 - Known limitations — round-trip cost, the `device_id` argument name, no file uploads, no
   GraphQL — are listed there rather than duplicated here.

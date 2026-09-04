@@ -1,0 +1,156 @@
+import { createRemoteJWKSet, jwtVerify } from "jose";
+import { JOSEError, JWKSMultipleMatchingKeys, JWKSNoMatchingKey } from "jose/errors";
+
+const JWKS_CACHE_MAX_AGE_MS = 5 * 60_000;
+const JWKS_COOLDOWN_MS = 30_000;
+const JWKS_TIMEOUT_MS = 5_000;
+const JWKS_FAILURE_BACKOFF_INITIAL_MS = 1_000;
+const JWKS_FAILURE_BACKOFF_MAX_MS = 30_000;
+
+export interface OidcConfig {
+  issuer: string;
+  jwksUrl: string;
+  audience: string;
+  requiredScope?: string | undefined;
+}
+
+export interface OidcPrincipal {
+  issuer: string;
+  subject: string;
+}
+
+export class OidcAuthenticationError extends Error {
+  constructor(readonly status: 401 | 403 | 503) {
+    super(
+      status === 403
+        ? "Forbidden"
+        : status === 503
+          ? "Service unavailable"
+          : "Unauthorized",
+    );
+  }
+}
+
+/** Read the gateway configuration only when HTTP authentication is relevant. */
+export function loadOidcConfig(
+  env: NodeJS.ProcessEnv,
+  required: boolean,
+): OidcConfig | undefined {
+  const issuer = (env.NETBOX_OIDC_ISSUER ?? "").trim();
+  const jwksUrl = (env.NETBOX_OIDC_JWKS_URL ?? "").trim();
+  const audience = (env.NETBOX_OIDC_AUDIENCE ?? "").trim();
+  const requiredScope = (env.NETBOX_OIDC_REQUIRED_SCOPE ?? "").trim();
+  const configured = issuer || jwksUrl || audience || requiredScope;
+  if (!required && !configured) return undefined;
+  const config = {
+    issuer,
+    jwksUrl,
+    audience,
+    ...(requiredScope ? { requiredScope } : {}),
+  };
+  assertOidcConfig(config);
+  return config;
+}
+
+export function assertOidcConfig(config: OidcConfig): void {
+  if (!config.issuer.trim()) {
+    throw new Error("Missing required environment variable NETBOX_OIDC_ISSUER.");
+  }
+  if (!config.jwksUrl.trim()) {
+    throw new Error("Missing required environment variable NETBOX_OIDC_JWKS_URL.");
+  }
+  if (!config.audience.trim()) {
+    throw new Error("Missing required environment variable NETBOX_OIDC_AUDIENCE.");
+  }
+  assertCanonicalHttpsUrl("NETBOX_OIDC_ISSUER", config.issuer);
+  assertCanonicalHttpsUrl("NETBOX_OIDC_JWKS_URL", config.jwksUrl);
+}
+
+function assertCanonicalHttpsUrl(name: string, value: string): void {
+  try {
+    const parsed = new URL(value);
+    if (
+      parsed.protocol !== "https:" ||
+      !parsed.hostname ||
+      parsed.username ||
+      parsed.password ||
+      parsed.search ||
+      parsed.hash
+    ) {
+      throw new Error("invalid URL");
+    }
+  } catch {
+    throw new Error(
+      `${name} must be a canonical HTTPS URL without userinfo, a query, or a fragment.`,
+    );
+  }
+}
+
+export interface OidcAuthenticator {
+  authenticate(authorization: string | undefined): Promise<OidcPrincipal>;
+}
+
+/** Verify gateway access tokens without exposing them to the NetBox API client. */
+export function createOidcAuthenticator(config: OidcConfig): OidcAuthenticator {
+  const keys = createRemoteJWKSet(new URL(config.jwksUrl), {
+    cacheMaxAge: JWKS_CACHE_MAX_AGE_MS,
+    cooldownDuration: JWKS_COOLDOWN_MS,
+    timeoutDuration: JWKS_TIMEOUT_MS,
+  });
+  let unavailableUntil = 0;
+  let failureBackoffMs = JWKS_FAILURE_BACKOFF_INITIAL_MS;
+
+  return {
+    async authenticate(authorization: string | undefined): Promise<OidcPrincipal> {
+      const token = bearerToken(authorization);
+      if (!token) throw new OidcAuthenticationError(401);
+      if (Date.now() < unavailableUntil) throw new OidcAuthenticationError(503);
+      try {
+        const { payload } = await jwtVerify(token, keys, {
+          algorithms: ["RS256", "ES256"],
+          issuer: config.issuer,
+          audience: config.audience,
+        });
+        if (typeof payload.exp !== "number") throw new OidcAuthenticationError(401);
+        const subject = typeof payload.sub === "string" ? payload.sub : "";
+        if (!subject.trim()) throw new OidcAuthenticationError(401);
+        if (config.requiredScope && !hasScope(payload.scope, config.requiredScope)) {
+          throw new OidcAuthenticationError(403);
+        }
+        unavailableUntil = 0;
+        failureBackoffMs = JWKS_FAILURE_BACKOFF_INITIAL_MS;
+        return { issuer: config.issuer, subject };
+      } catch (error) {
+        if (error instanceof OidcAuthenticationError) throw error;
+        if (isUnavailableJwks(error)) {
+          unavailableUntil = Date.now() + failureBackoffMs;
+          failureBackoffMs = Math.min(failureBackoffMs * 2, JWKS_FAILURE_BACKOFF_MAX_MS);
+          throw new OidcAuthenticationError(503);
+        }
+        throw new OidcAuthenticationError(401);
+      }
+    },
+  };
+}
+
+function bearerToken(authorization: string | undefined): string | undefined {
+  const match = /^Bearer ([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$/.exec(
+    authorization ?? "",
+  );
+  return match?.[1];
+}
+
+function hasScope(scope: unknown, requiredScope: string): boolean {
+  return typeof scope === "string" && scope.split(/\s+/).includes(requiredScope);
+}
+
+function isUnavailableJwks(error: unknown): boolean {
+  if (error instanceof JWKSNoMatchingKey || error instanceof JWKSMultipleMatchingKeys) {
+    return false;
+  }
+  return (
+    error instanceof TypeError ||
+    (error instanceof JOSEError &&
+      (error.code === "ERR_JOSE_GENERIC" || error.code.startsWith("ERR_JWKS_")))
+  );
+}
