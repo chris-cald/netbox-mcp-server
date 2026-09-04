@@ -10,6 +10,14 @@ surface may change in a minor release, with the change noted here.
 
 ## [Unreleased]
 
+### Added
+
+- **Loopback-only Streamable HTTP MCP transport.** Set `NETBOX_TRANSPORT=http`
+  to serve MCP at `/mcp` and unauthenticated `/healthz` and `/readyz` probes.
+  `NETBOX_HTTP_HOST` defaults to `127.0.0.1`; non-loopback listeners are rejected
+  until gateway authentication is added in M6. Gateway OAuth credentials are not
+  forwarded to NetBox, which continues to use only its configured API token.
+
 ### Fixed
 
 - **The release workflow never shipped the skill.** `docs/installing-the-skill.md`
