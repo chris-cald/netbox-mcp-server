@@ -27,6 +27,7 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import zlib from "node:zlib";
 
+import { netBoxAuthorization } from "../authorization.js";
 import type { NetBoxConfig } from "../config.js";
 import { createCredentialRedactor, type SecretRedactor } from "../errors.js";
 import { isOpenApiDocument, type OpenApiDocument } from "./openapi.js";
@@ -106,7 +107,7 @@ async function authorizedRequest(config: NetBoxConfig): Promise<AuthorizedReques
   const token = await config.credentials.getToken();
   return {
     headers: {
-      Authorization: `Token ${token}`,
+      Authorization: netBoxAuthorization(token),
       Accept: "application/vnd.oai.openapi+json, application/json",
       "Accept-Encoding": "gzip, deflate",
       "User-Agent": "netbox-mcp",

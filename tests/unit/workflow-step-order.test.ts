@@ -73,6 +73,21 @@ describe.each(WORKFLOWS)("%s", (workflow) => {
  * at the real publish. That is exactly what happened on the first v0.1.0
  * release run.
  */
+describe(".github/workflows/ci.yml opt-in NetBox E2E", () => {
+  const yaml = readFileSync(".github/workflows/ci.yml", "utf8");
+
+  it("keeps the container fixture manual or explicitly opted in without secrets", () => {
+    const job = yaml.slice(yaml.indexOf("  netbox-e2e:"), yaml.indexOf("\n  secrets:"));
+    expect(job).toContain("NetBox fixture E2E (manual/opt-in)");
+    expect(job).toContain(
+      "github.event_name == 'workflow_dispatch' || vars.NETBOX_E2E == '1'",
+    );
+    expect(job).toContain("runs-on: ubuntu-latest");
+    expect(job).toContain('NETBOX_E2E_COMPOSE_COMMAND: "docker compose"');
+    expect(job).not.toContain("secrets.");
+  });
+});
+
 describe(".github/workflows/release.yml auth paths", () => {
   const yaml = readFileSync(".github/workflows/release.yml", "utf8");
 
