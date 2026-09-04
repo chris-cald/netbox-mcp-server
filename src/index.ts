@@ -14,6 +14,7 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 
 import { loadConfig } from "./config.js";
+import { createStreamableHttpServer, loadTransportConfig } from "./http.js";
 import { buildServer, listTools, SERVER_NAME, SERVER_VERSION } from "./server.js";
 
 const EX_CONFIG = 78;
@@ -39,6 +40,9 @@ const HELP = [
   "  NETBOX_INSECURE     Set to 1/true/yes to disable TLS certificate verification.",
   "                      This exposes the token to anyone able to intercept the",
   "                      connection. Prefer installing your internal root CA.",
+  "  NETBOX_TRANSPORT    stdio (default) or http. HTTP is loopback-only until M6.",
+  "  NETBOX_HTTP_HOST    Loopback listener address for HTTP (default: 127.0.0.1).",
+  "  NETBOX_HTTP_PORT    HTTP listener port (default: 3000).",
   "",
   "NETBOX_TOKEN_FILE is read before every NetBox request so token rotation takes",
   "effect without restart. File paths and token values are never reported.",
@@ -48,14 +52,18 @@ const HELP = [
   "permissions, if the assistant should not be able to change anything. That",
   "is enforced by NetBox, where no tool argument can reach it.",
   "",
-  "Transport: stdio only. This binary is launched as a subprocess by an",
-  "MCP-aware client (Claude Desktop, Claude Code, Cursor, Codex, ...).",
+  "Transport: stdio by default, or Streamable HTTP at /mcp when NETBOX_TRANSPORT=http.",
+  "HTTP exposes unauthenticated /healthz and /readyz only on a loopback listener until M6.",
 ].join("\n");
+
+async function validateNetBoxConfig(): Promise<void> {
+  const config = loadConfig();
+  await config.credentials.getToken();
+}
 
 async function runStdio(): Promise<void> {
   try {
-    const config = loadConfig();
-    await config.credentials.getToken();
+    await validateNetBoxConfig();
   } catch (err) {
     console.error(err instanceof Error ? err.message : String(err));
     process.exit(EX_CONFIG);
@@ -64,6 +72,34 @@ async function runStdio(): Promise<void> {
   const server = buildServer();
   await server.connect(new StdioServerTransport());
   console.error(`${SERVER_NAME} v${SERVER_VERSION} running on stdio`);
+}
+
+async function runHttp(): Promise<void> {
+  try {
+    await validateNetBoxConfig();
+    const config = loadTransportConfig();
+    if (config.transport !== "http") throw new Error("NETBOX_TRANSPORT must be http.");
+    const server = createStreamableHttpServer(config);
+    await server.listen();
+    console.error(
+      `${SERVER_NAME} v${SERVER_VERSION} running Streamable HTTP on http://${config.host}:${config.port}/mcp`,
+    );
+    await new Promise<void>((resolve, reject) => {
+      let closing = false;
+      const shutdown = () => {
+        if (closing) return;
+        closing = true;
+        process.off("SIGINT", shutdown);
+        process.off("SIGTERM", shutdown);
+        void server.close().then(resolve, reject);
+      };
+      process.once("SIGINT", shutdown);
+      process.once("SIGTERM", shutdown);
+    });
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exit(err instanceof Error && /NETBOX_/.test(err.message) ? EX_CONFIG : 1);
+  }
 }
 
 async function main(): Promise<void> {
@@ -83,6 +119,7 @@ async function main(): Promise<void> {
     try {
       const config = loadConfig();
       await config.credentials.getToken();
+      loadTransportConfig();
       console.log(
         `ok: ${SERVER_NAME} v${SERVER_VERSION} configured for ${config.baseUrl}`,
       );
@@ -105,7 +142,17 @@ async function main(): Promise<void> {
     return;
   }
 
-  await runStdio();
+  try {
+    const transport = loadTransportConfig();
+    if (transport.transport === "http") {
+      await runHttp();
+    } else {
+      await runStdio();
+    }
+  } catch (err) {
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exit(EX_CONFIG);
+  }
 }
 
 main().catch((err: unknown) => {

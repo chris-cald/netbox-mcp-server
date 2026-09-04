@@ -36,21 +36,22 @@ repo first (section 4B) and read `AGENTS.md` from disk.
 exposes a [NetBox](https://netbox.dev/) instance (the network / datacenter source of
 truth) to an AI assistant as callable tools.
 
-It runs **locally on the user's Mac** as a subprocess of their AI client, over **stdio**.
+It runs locally on the user's Mac: normally as a subprocess of their AI client over
+**stdio**, or as a loopback-only Streamable HTTP listener when explicitly configured.
 It is not a hosted service, there is no login page, and nothing is deployed anywhere.
 
 Facts you may need:
 
-| Property            | Value                                                                   |
-| ------------------- | ----------------------------------------------------------------------- |
-| Version documented  | `0.2.0`                                                                 |
-| Language / runtime  | TypeScript compiled to ESM JavaScript, Node.js **>= 20.11**             |
-| npm package         | `@zenixsolutions/netbox-mcp`, binary name `netbox-mcp`                  |
-| Normal install      | `npx -y @zenixsolutions/netbox-mcp` — no clone, no build                |
-| Transport           | stdio only                                                              |
-| Credential env vars | `NETBOX_URL`, plus exactly one of `NETBOX_TOKEN` or `NETBOX_TOKEN_FILE` |
-| Optional env vars   | `NETBOX_INSECURE` — **and nothing else**                                |
-| Tools registered    | **6**, always — see below                                               |
+| Property            | Value                                                                                      |
+| ------------------- | ------------------------------------------------------------------------------------------ |
+| Version documented  | `0.2.0`                                                                                    |
+| Language / runtime  | TypeScript compiled to ESM JavaScript, Node.js **>= 20.11**                                |
+| npm package         | `@zenixsolutions/netbox-mcp`, binary name `netbox-mcp`                                     |
+| Normal install      | `npx -y @zenixsolutions/netbox-mcp` — no clone, no build                                   |
+| Transport           | stdio (default), or loopback-only Streamable HTTP at `/mcp`                                |
+| Credential env vars | `NETBOX_URL`, plus exactly one of `NETBOX_TOKEN` or `NETBOX_TOKEN_FILE`                    |
+| Optional env vars   | `NETBOX_INSECURE`; `NETBOX_TRANSPORT`, `NETBOX_HTTP_HOST`, and `NETBOX_HTTP_PORT` for HTTP |
+| Tools registered    | **6**, always — see below                                                                  |
 
 ### The six tools
 
@@ -381,8 +382,9 @@ Write `npx -y @zenixsolutions/netbox-mcp` where the table says `netbox-mcp`, or
 | `netbox-mcp --check`      | Validates configuration; names the first missing or invalid variable. Contacts nothing.   | **0** usable, **78** not usable |
 | `netbox-mcp --list-tools` | Prints the 6 tool names to stdout, `6 tools registered.` to stderr. Needs no credentials. | 0                               |
 
-Any other argument, or no argument at all, starts the server on stdio. There is no
-`--verbose`, no `--config`, and no `--port`; do not pass flags that are not in this table.
+Any other argument, or no argument at all, starts the configured transport: stdio by
+default, or Streamable HTTP when `NETBOX_TRANSPORT=http`. There is no `--verbose`,
+`--config`, or `--port` flag; do not pass flags that are not in this table.
 
 ### 5.1 `--help`
 
@@ -409,6 +411,9 @@ Optional environment variables:
   NETBOX_INSECURE     Set to 1/true/yes to disable TLS certificate verification.
                       This exposes the token to anyone able to intercept the
                       connection. Prefer installing your internal root CA.
+  NETBOX_TRANSPORT    stdio (default) or http. HTTP is loopback-only until M6.
+  NETBOX_HTTP_HOST    Loopback listener address for HTTP (default: 127.0.0.1).
+  NETBOX_HTTP_PORT    HTTP listener port (default: 3000).
 
 NETBOX_TOKEN_FILE is read before every NetBox request so token rotation takes
 effect without restart. File paths and token values are never reported.
@@ -418,8 +423,8 @@ the token with 'write enabled' unchecked, and constrain its object
 permissions, if the assistant should not be able to change anything. That
 is enforced by NetBox, where no tool argument can reach it.
 
-Transport: stdio only. This binary is launched as a subprocess by an
-MCP-aware client (Claude Desktop, Claude Code, Cursor, Codex, ...).
+Transport: stdio by default, or Streamable HTTP at /mcp when NETBOX_TRANSPORT=http.
+HTTP exposes unauthenticated /healthz and /readyz only on a loopback listener until M6.
 ```
 
 Note what that list does **not** contain: there is no `NETBOX_READONLY` and no
@@ -515,10 +520,11 @@ not running `0.2.0`.
 ### 5.4 Running the server directly
 
 Starting it with no arguments and no configuration exits **78** with the same
-`Missing required environment variable NETBOX_URL` message. With configuration present it
+`Missing required environment variable NETBOX_URL` message. With stdio configuration it
 prints `netbox-mcp-server v0.2.0 running on stdio` to stderr and then waits for JSON-RPC
-on stdin — both verified. Do not leave a bare server running in your shell; it is the
-client's job to launch it.
+on stdin. With `NETBOX_TRANSPORT=http`, it instead listens on loopback at `/mcp` and
+prints its HTTP URL to stderr. Do not leave a bare server running in your shell; it is
+the client's job to launch it.
 
 ---
 
@@ -534,7 +540,7 @@ recreate it, and do not repeat any claim of that shape.
 - Use the absolute path to `npx` — or to `node`, on the clone path (see 6.0 below).
 - On the clone path, use the **absolute** path to `dist/index.js` too. Tildes (`~`) are
   **not** expanded by MCP clients.
-- **Set `NETBOX_URL` and exactly one of `NETBOX_TOKEN` or `NETBOX_TOKEN_FILE`, plus — if section 3.5 found an internal CA — `NETBOX_INSECURE`.** The file source must be a readable regular file and is read before every request, so rotation takes effect without restart. Anything else in the `env` block is ignored by the server. In particular, do not write `NETBOX_READONLY` or `NETBOX_TOOL_GROUPS`: they do nothing, and their presence misleads the next person who reads the file into thinking writes are restricted.
+- **Set `NETBOX_URL` and exactly one of `NETBOX_TOKEN` or `NETBOX_TOKEN_FILE`, plus — if section 3.5 found an internal CA — `NETBOX_INSECURE`.** For an explicit local HTTP listener, also set `NETBOX_TRANSPORT=http` and optionally `NETBOX_HTTP_HOST` (loopback only) and `NETBOX_HTTP_PORT`; stdio remains the default. The file source must be a readable regular file and is read before every request, so rotation takes effect without restart. In particular, do not write `NETBOX_READONLY` or `NETBOX_TOOL_GROUPS`: they do nothing, and their presence misleads the next person who reads the file into thinking writes are restricted.
 - **Never write the token into a shell profile**, a script, or any file other than this
   config or a dedicated token file. Never write the token-file contents into the client config.
 - **This is a MERGE, not an overwrite.** The user almost certainly has other MCP servers
@@ -693,10 +699,12 @@ here, but the absolute path stays correct if they later switch Node versions.
 
 ### 6.5 ChatGPT and other HTTP-only clients
 
-**This server is stdio-only.** A client that can only reach MCP servers over HTTP or SSE
-— which includes ChatGPT's hosted connectors — cannot use it as-is. Say that plainly
-rather than improvising a tunnel or a proxy, and offer Claude Desktop, Claude Code,
-Cursor or Codex CLI (6.1–6.4) as working alternatives on the same machine.
+**This server supports stdio by default and loopback-only Streamable HTTP when
+`NETBOX_TRANSPORT=http`.** Its HTTP endpoint is `/mcp`; `/healthz` and `/readyz` are
+unauthenticated local probes. Public listeners are rejected until M6 adds gateway
+authentication, so hosted HTTP-only clients (including ChatGPT and Grok connectors)
+remain unsupported. Do not improvise a tunnel or proxy; offer Claude Desktop, Claude
+Code, Cursor, or Codex CLI (6.1–6.4) as working alternatives on the same machine.
 
 The ChatGPT **desktop app**'s support for locally-launched stdio servers has changed
 repeatedly and differs by plan and OS, so this runbook cannot pin a file format for it.
@@ -707,7 +715,7 @@ repeatedly and differs by plan and OS, so this runbook cannot pin a file format 
 2. If there is a UI for adding a local/stdio server, fill it in with the three values you
    already have — they are the same for every client: the absolute `npx` (or `node`)
    path, the arguments, and the `NETBOX_URL` / `NETBOX_TOKEN` environment pair.
-3. If the settings offer **only** remote servers, stop, and see the paragraph above.
+3. If the settings offer **only** remote servers, stop: the loopback listener is not a public authenticated endpoint.
 4. If you have web access and the user wants current support confirmed, consult OpenAI's
    official documentation. Report what it says; do not extrapolate.
 
@@ -949,20 +957,26 @@ apart from those config paths; the commands in sections 4, 5, 7 and 8 are identi
 
 ## 11. Environment variable reference
 
-This is the complete list. `--help` (section 5.1) is the authoritative source, and it
-names these four and no others.
+This is the complete list. `--help` (section 5.1) is the authoritative source.
 
-| Variable            | Required | Default | Meaning                                                                                                                     |
-| ------------------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `NETBOX_URL`        | **yes**  | —       | Base URL, no `/api` suffix. A trailing `/` or `/api` is stripped automatically. Must parse as a URL, or `--check` exits 78. |
-| `NETBOX_TOKEN`      | one of   | —       | Inline NetBox API token. Its permissions are the only thing that limits what the assistant can do.                          |
-| `NETBOX_TOKEN_FILE` | one of   | —       | A readable regular file containing the token. It is mutually exclusive with `NETBOX_TOKEN` and read before every request.   |
-| `NETBOX_INSECURE`   | no       | off     | Disables TLS certificate verification for every call to NetBox, including the token-bearing ones. See the warning below.    |
+| Variable            | Required | Default     | Meaning                                                                                                                     |
+| ------------------- | -------- | ----------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `NETBOX_URL`        | **yes**  | —           | Base URL, no `/api` suffix. A trailing `/` or `/api` is stripped automatically. Must parse as a URL, or `--check` exits 78. |
+| `NETBOX_TOKEN`      | one of   | —           | Inline NetBox API token. Its permissions are the only thing that limits what the assistant can do.                          |
+| `NETBOX_TOKEN_FILE` | one of   | —           | A readable regular file containing the token. It is mutually exclusive with `NETBOX_TOKEN` and read before every request.   |
+| `NETBOX_INSECURE`   | no       | off         | Disables TLS certificate verification for every call to NetBox, including the token-bearing ones. See the warning below.    |
+| `NETBOX_TRANSPORT`  | no       | `stdio`     | `stdio` (default) or `http`; HTTP is loopback-only until M6 adds gateway authentication.                                    |
+| `NETBOX_HTTP_HOST`  | http     | `127.0.0.1` | Loopback IP address for the HTTP listener; non-loopback values are rejected.                                                |
+| `NETBOX_HTTP_PORT`  | http     | `3000`      | HTTP listener port, from 1 through 65535.                                                                                   |
 
 Boolean variables are true for `1`, `true`, `yes`, `y`, or `on` (case-insensitive, after
 trimming whitespace). Every other value, including an empty string, is false.
 
 `NETBOX_TOKEN_FILE` is for a server-side secret mount, not a tool argument or result. Its path and contents are never reported. Missing, unreadable, non-file, and empty token files fail closed; normal line-ending whitespace is trimmed. The file is read on each NetBox request, so a secret-manager rotation is used without restart.
+
+With `NETBOX_TRANSPORT=http`, MCP is served at `/mcp`; unauthenticated local probes are
+available at `/healthz` and `/readyz`. The listener accepts only loopback IP addresses
+until M6 adds gateway authentication, and caller headers are never NetBox credentials.
 
 ⚠️ **`NETBOX_INSECURE=1` turns off certificate verification entirely.** Anyone able to
 intercept the connection can present their own certificate and read the API token. Use it
