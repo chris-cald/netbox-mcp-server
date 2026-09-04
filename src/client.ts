@@ -11,6 +11,7 @@ import axios, { AxiosError, AxiosInstance, AxiosResponse } from "axios";
 import http from "node:http";
 import https from "node:https";
 
+import { netBoxAuthorization } from "./authorization.js";
 import { loadConfig, NetBoxConfig } from "./config.js";
 import { DEFAULT_TIMEOUT_MS } from "./constants.js";
 import { createCredentialRedactor, handleApiError } from "./errors.js";
@@ -210,7 +211,7 @@ export class NetBoxClient implements NetBoxApi {
   ): Promise<AxiosResponse<T>> {
     const token = await this.config.credentials.getToken();
     try {
-      const response = await send(`Token ${token}`);
+      const response = await send(netBoxAuthorization(token));
       if (response.status >= 400) throw axiosLikeError(response);
       return response;
     } catch (error) {

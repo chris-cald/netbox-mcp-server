@@ -81,14 +81,33 @@ cannot be used by any client that only speaks HTTP.
 
 ## NetBox
 
-|                         |                                                                         |
-| ----------------------- | ----------------------------------------------------------------------- |
-| Contract-tested against | **NetBox 4.6.0**, with `netbox_inventory` 2.6.0. 435 checks, 0 defects. |
-| Known-good range        | 4.6.0 only. See below — one version is not a range.                     |
-| Authentication          | API token, `Authorization: Token <token>`.                              |
+|                         |                                                                                                                                   |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| Contract-tested against | **NetBox 4.6.0**, with `netbox_inventory` 2.6.0. 435 checks, 0 defects.                                                           |
+| Known-good range        | 4.6.0 only. See below — one version is not a range.                                                                               |
+| Authentication          | Legacy API token: `Authorization: Token <token>`; complete v2 `nbt_<identifier>.<secret>` token: `Authorization: Bearer <token>`. |
 
 **Response shapes differ across NetBox versions.** One instance has been tested.
 Please include your NetBox version in any bug report.
+
+### Patched local E2E fixture
+
+`npm test` never builds or starts containers. `npm run test:e2e` is the explicit,
+Podman-backed check for the controlled available-IPs path. It builds
+`localhost/netbox-mcp-e2e:4.6.7-635361b` locally from the public fork commit
+[`635361b87d67b70e9338fa141e8ad932c2b2fba4`](https://github.com/chris-cald/netbox/commit/635361b87d67b70e9338fa141e8ad932c2b2fba4).
+The runner verifies the source revision and the built image provenance before
+use. Its NetBox base is pinned to
+`netboxcommunity/netbox@sha256:7ad3a287d38829c98799c4a03d874d3d309738d1f42987dfd8037ec0e80587ce`,
+and only the patched serializer file enters the image; no NetBox source is
+vendored here.
+
+This validates the patched local fixture, not unpatched NetBox 4.6.7. Stock
+NetBox 4.6.7 returns `role: null` from a successful available-IPs allocation
+while its generated response schema declares `role` as a non-null object. The
+gateway deliberately rejects that schema-inconsistent response, so stock E2E
+is blocked until the upstream schema fix lands. The captured v4.6.7 OpenAPI
+fixture remains unmodified to preserve that regression case.
 
 ### Establishing the supported range
 
@@ -160,6 +179,7 @@ search will attempt that endpoint on an instance without the plugin.
 
 ## Known limitations
 
+- **Stock available-IPs allocation E2E is blocked on unpatched NetBox 4.6.7.** See the patched local fixture note above; gateway response validation is intentionally not relaxed.
 - **No remote HTTP transport.** See the client table above.
 - **A write costs several calls.** The layered design trades round-trips for
   context. Measured against a live instance: a trivial read is 1 call, and

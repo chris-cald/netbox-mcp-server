@@ -58,6 +58,35 @@ describe("NetBoxClient credentials", () => {
     expect(headers).toEqual(["Token rotated-token-1", "Token rotated-token-2"]);
   });
 
+  it.each([
+    ["legacy token", "0123456789abcdef0123456789abcdef01234567", "Token"],
+    ["complete v2 token", "nbt_example01.example-secret", "Bearer"],
+    ["incomplete v2 lookalike", "nbt_example01", "Token"],
+  ])("uses %s authentication for each request", async (_name, token, scheme) => {
+    const config: NetBoxConfig = {
+      baseUrl: "https://netbox.example.com",
+      apiUrl: "https://netbox.example.com/api",
+      credentials: { getToken: () => Promise.resolve(token) },
+      insecure: false,
+    };
+    let authorization: string | undefined;
+    const http = axios.create({
+      adapter: (request) => {
+        authorization = String(request.headers.get("Authorization"));
+        return Promise.resolve({
+          data: { count: 0, next: null, previous: null, results: [] },
+          status: 200,
+          statusText: "OK",
+          headers: {},
+          config: request,
+        });
+      },
+    });
+
+    await new NetBoxClient(config, { http }).list("dcim/sites");
+    expect(authorization).toBe(`${scheme} ${token}`);
+  });
+
   it("does not forward Authorization to a redirect subdomain", async () => {
     const token = "redirect-token-that-must-not-leak";
     let redirectedAuthorization: string | undefined;

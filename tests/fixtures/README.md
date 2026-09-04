@@ -3,7 +3,11 @@
 ## `netbox-schema-subset.json`
 
 A **real, unmodified subset** of NetBox's own generated OpenAPI document. Nothing in it is
-hand-written: every path item and component schema is copied verbatim from upstream.
+hand-written: every path item and component schema is copied verbatim from upstream. It
+**must remain unmodified**: the `IPAddress.role` response shape is deliberately the
+unpatched v4.6.7 contract used to prove that gateway validation rejects `role: null`.
+The separately opt-in patched-container E2E test validates the upstream fix; it does not
+change this captured fixture.
 
 |                     |                                                                                                                                                                 |
 | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |

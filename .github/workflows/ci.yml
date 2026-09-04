@@ -84,6 +84,33 @@ jobs:
       - name: Smoke test the built binary
         run: node scripts/smoke-cli.mjs
 
+  netbox-e2e:
+    name: NetBox fixture E2E (manual/opt-in)
+    # Containers run only when manually dispatched or when repository variable
+    # NETBOX_E2E is explicitly set to 1; ordinary pushes and PRs stay hermetic.
+    if: github.event_name == 'workflow_dispatch' || vars.NETBOX_E2E == '1'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install
+        run: npm ci
+        env:
+          NODE_ENV: development
+
+      - name: Run disposable NetBox fixture E2E
+        run: npm run test:e2e
+        env:
+          NETBOX_E2E: "1"
+          NETBOX_E2E_COMPOSE_COMMAND: "docker compose"
+
   secrets:
     name: secret scan
     runs-on: ubuntu-latest

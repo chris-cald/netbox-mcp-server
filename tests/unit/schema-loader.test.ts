@@ -124,25 +124,32 @@ describe("transport redirects", () => {
 });
 
 describe("fetching", () => {
-  it("requests /api/schema/?format=json with the token and the vendor Accept type", async () => {
-    const { httpGet, calls } = makeHttpGet({
-      "/status/": ok({ "netbox-version": "4.6.7" }),
-      "/schema/": ok(document),
-    });
-    const loaded = await createSchemaLoader({
-      config,
-      httpGet,
-      cacheDir,
-      warn: () => {},
-    }).load();
+  it.each([
+    ["legacy token", "s3cr3t-token", "Token"],
+    ["complete v2 token", "nbt_example01.example-secret", "Bearer"],
+    ["incomplete v2 lookalike", "nbt_example01", "Token"],
+  ])(
+    "requests schema with %s authentication and the vendor Accept type",
+    async (_name, token, scheme) => {
+      const { httpGet, calls } = makeHttpGet({
+        "/status/": ok({ "netbox-version": "4.6.7" }),
+        "/schema/": ok(document),
+      });
+      const loaded = await createSchemaLoader({
+        config: { ...config, credentials: { getToken: () => Promise.resolve(token) } },
+        httpGet,
+        cacheDir,
+        warn: () => {},
+      }).load();
 
-    const schemaCall = calls.find((call) => call.url.includes("/schema/"));
-    expect(schemaCall?.url).toBe("https://netbox.example.com/api/schema/?format=json");
-    expect(schemaCall?.headers["Authorization"]).toBe("Token s3cr3t-token");
-    expect(schemaCall?.headers["Accept"]).toContain("application/vnd.oai.openapi+json");
-    expect(loaded.version).toBe("4.6.7");
-    expect(loaded.source).toBe("network");
-  });
+      const schemaCall = calls.find((call) => call.url.includes("/schema/"));
+      expect(schemaCall?.url).toBe("https://netbox.example.com/api/schema/?format=json");
+      expect(schemaCall?.headers["Authorization"]).toBe(`${scheme} ${token}`);
+      expect(schemaCall?.headers["Accept"]).toContain("application/vnd.oai.openapi+json");
+      expect(loaded.version).toBe("4.6.7");
+      expect(loaded.source).toBe("network");
+    },
+  );
 
   /**
    * A live 4.6.0 transferred the schema UNCOMPRESSED: 12,431,579 bytes in

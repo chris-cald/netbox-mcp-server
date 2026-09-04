@@ -596,6 +596,40 @@ describe("IPAM prefix controlled semantic actions", () => {
     }
   });
 
+  it("rejects role:null when the captured response contract declares an object", async () => {
+    const http = api();
+    http.prefixDetailAction.mockResolvedValue([
+      {
+        address: "192.0.2.1/32",
+        assigned_object: null,
+        created: null,
+        display: "192.0.2.1/32",
+        display_url: "http://netbox.test/ipam/ip-addresses/1/",
+        family: { value: 4, label: "IPv4" },
+        id: 1,
+        last_updated: null,
+        nat_outside: [],
+        role: null,
+        url: "http://netbox.test/api/ipam/ip-addresses/1/",
+      },
+    ]);
+    const client = await connect(createSchemaProviderFromDocument(fixture), http);
+    try {
+      const response = await client.callTool({
+        name: "netbox_invoke",
+        arguments: {
+          operation: "ipam.prefix.allocate_ip",
+          target: 7,
+          input: { data: [{}] },
+        },
+      });
+      expect(resultText(response)).toContain("response[0].role must be an object");
+      expect(http.prefixDetailAction).toHaveBeenCalledOnce();
+    } finally {
+      await client.close();
+    }
+  });
+
   it("compacts oversized action metadata in discover and describe structured content", async () => {
     const oversizedMetadata = structuredClone(fixture);
     const availableIp = oversizedMetadata.components?.schemas?.AvailableIP;

@@ -7,7 +7,7 @@ export default defineConfig({
     // has its own config, `vitest.contract.config.ts`. `npm test` stays
     // hermetic: it must not become network-dependent because a developer
     // happens to have NETBOX_URL exported.
-    exclude: ["node_modules/**", "dist/**", "tests/contract/**"],
+    exclude: ["node_modules/**", "dist/**", "tests/contract/**", "tests/e2e/**"],
     environment: "node",
     // The surface and packaging suites build and spawn the server; they are
     // slower than a unit test and must not be raced against each other.
