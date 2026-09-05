@@ -84,6 +84,63 @@ jobs:
       - name: Smoke test the built binary
         run: node scripts/smoke-cli.mjs
 
+  container:
+    name: Container build and Compose deployment profile
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+
+      # Build independently of the disposable NetBox E2E fixture. This proves
+      # the production image and its loopback-only operational profile without
+      # requiring a live NetBox or putting a credential in GitHub Actions.
+      - name: Prepare an ephemeral file-backed secret
+        run: |
+          umask 077
+          printf 'ci-placeholder-token\n' > "$RUNNER_TEMP/netbox-token"
+          # File-backed Compose secrets are bind mounts on Docker Compose, which
+          # does not apply the requested uid/gid/mode. This is a dummy CI value;
+          # production must use a managed secret backend as the docs require.
+          chmod 0444 "$RUNNER_TEMP/netbox-token"
+
+      - name: Build the production image with traceable metadata
+        run: |
+          docker build \
+            --build-arg VERSION="${GITHUB_SHA::12}" \
+            --build-arg REVISION="$GITHUB_SHA" \
+            --build-arg CREATED="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --tag netbox-mcp:ci .
+          test "$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' netbox-mcp:ci)" = "$GITHUB_SHA"
+
+      - name: Validate and start the loopback-only deployment profile
+        env:
+          NETBOX_URL: https://netbox.example.test
+          NETBOX_TOKEN_FILE: ${{ runner.temp }}/netbox-token
+          NETBOX_MCP_IMAGE: netbox-mcp:ci
+        run: |
+          docker compose --profile deployment config
+          docker compose --profile deployment up -d
+          container_id="$(docker compose --profile deployment ps -q netbox-mcp)"
+          for attempt in $(seq 1 30); do
+            status="$(docker inspect --format '{{.State.Health.Status}}' "$container_id")"
+            if [ "$status" = healthy ]; then
+              break
+            fi
+            sleep 1
+          done
+          test "${status:-}" = healthy
+          published="$(docker compose --profile deployment port netbox-mcp 3000 2>/dev/null || true)"
+          test -z "$published"
+
+      - name: Stop the deployment profile
+        if: always()
+        env:
+          NETBOX_URL: https://netbox.example.test
+          NETBOX_TOKEN_FILE: ${{ runner.temp }}/netbox-token
+          NETBOX_MCP_IMAGE: netbox-mcp:ci
+        run: docker compose --profile deployment down --volumes --remove-orphans
+
   netbox-e2e:
     name: NetBox fixture E2E (manual/opt-in)
     # Containers run only when manually dispatched or when repository variable
