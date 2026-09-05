@@ -12,11 +12,14 @@ surface may change in a minor release, with the change noted here.
 
 ### Added
 
-- **Loopback-only Streamable HTTP MCP transport.** Set `NETBOX_TRANSPORT=http`
-  to serve MCP at `/mcp` and unauthenticated `/healthz` and `/readyz` probes.
-  `NETBOX_HTTP_HOST` defaults to `127.0.0.1`; non-loopback listeners are rejected
-  until gateway authentication is added in M6. Gateway OAuth credentials are not
-  forwarded to NetBox, which continues to use only its configured API token.
+- **Loopback-only Streamable HTTP MCP transport with optional OIDC.** Set
+  `NETBOX_TRANSPORT=http` to serve MCP at `/mcp` and unauthenticated `/healthz`
+  and `/readyz` probes on `127.0.0.1` (or `::1`). Public and wildcard HTTP binds
+  are rejected until a TLS-terminating proxy/TLS milestone. Optional canonical HTTPS
+  issuer/JWKS settings and exact audience authenticate local callers; every MCP
+  request requires an expiring RS256/ES256 Bearer token and binds sessions to its
+  issuer and subject. Gateway credentials are not forwarded to NetBox, which
+  continues to use only its configured API token.
 
 ### Fixed
 

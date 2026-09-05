@@ -1,4 +1,4 @@
-/** Streamable HTTP transport and its loopback-only listener configuration. */
+/** Streamable HTTP transport is loopback-only until TLS/proxy support ships. */
 
 import { randomUUID } from "node:crypto";
 import {
@@ -12,12 +12,25 @@ import { isIP, type AddressInfo } from "node:net";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 
+import {
+  assertOidcConfig,
+  createOidcAuthenticator,
+  loadOidcConfig,
+  OidcAuthenticationError,
+  type OidcConfig,
+  type OidcAuthenticator,
+  type OidcPrincipal,
+} from "./oidc.js";
 import { buildServer } from "./server.js";
 
 const DEFAULT_HTTP_HOST = "127.0.0.1";
 const DEFAULT_HTTP_PORT = 3000;
 const MAX_REQUEST_BYTES = 1024 * 1024;
 const MAX_SESSIONS = 100;
+export const MAX_SESSIONS_PER_PRINCIPAL = 10;
+export const SESSION_IDLE_TIMEOUT_MS = 30 * 60_000;
+export const SESSION_ABSOLUTE_TIMEOUT_MS = 8 * 60 * 60_000;
+const SESSION_EXPIRY_SWEEP_MS = 60_000;
 
 /** Conservative limits for incomplete HTTP requests on the local listener. */
 export const HTTP_HEADERS_TIMEOUT_MS = 10_000;
@@ -26,7 +39,8 @@ export const HTTP_REQUEST_TIMEOUT_MS = 30_000;
 type McpServer = ReturnType<typeof buildServer>;
 
 export type TransportConfig =
-  { transport: "stdio" } | { transport: "http"; host: string; port: number };
+  | { transport: "stdio" }
+  | { transport: "http"; host: string; port: number; oidc?: OidcConfig | undefined };
 
 /** Parse only transport configuration; NetBox credentials stay in config.ts. */
 export function loadTransportConfig(
@@ -45,7 +59,9 @@ export function loadTransportConfig(
   }
   const port = Number(rawPort);
   assertHttpListenerConfig(host, port);
-  return { transport: "http", host, port };
+  assertLoopbackListener(host);
+  const oidc = loadOidcConfig(env, false);
+  return { transport: "http", host, port, ...(oidc ? { oidc } : {}) };
 }
 
 function assertHttpListenerConfig(
@@ -53,10 +69,8 @@ function assertHttpListenerConfig(
   port: number,
   allowPortZero = false,
 ): void {
-  if (!isLoopbackAddress(host)) {
-    throw new Error(
-      "NETBOX_HTTP_HOST must be a loopback IP address until gateway authentication is configured.",
-    );
+  if (!isIP(host)) {
+    throw new Error("NETBOX_HTTP_HOST must be an IP address.");
   }
   if (!Number.isSafeInteger(port) || port < (allowPortZero ? 0 : 1) || port > 65535) {
     throw new Error("NETBOX_HTTP_PORT must be an integer from 1 through 65535.");
@@ -69,10 +83,26 @@ function isLoopbackAddress(host: string): boolean {
   return version === 6 && host === "::1";
 }
 
+function assertLoopbackListener(host: string): void {
+  if (host === "0.0.0.0" || host === "::") {
+    throw new Error(
+      "NETBOX_HTTP_HOST must not be a wildcard address; public HTTP is deferred until TLS/proxy support ships.",
+    );
+  }
+  if (!isLoopbackAddress(host)) {
+    throw new Error(
+      "NETBOX_HTTP_HOST must be a loopback IP address; public HTTP is deferred until TLS/proxy support ships.",
+    );
+  }
+}
+
 interface Session {
   id: string;
   server: McpServer;
   transport: StreamableHTTPServerTransport;
+  createdAt: number;
+  lastActivityAt: number;
+  principal?: OidcPrincipal | undefined;
 }
 
 export interface StreamableHttpServer {
@@ -89,11 +119,41 @@ export function createStreamableHttpServer(
 ): StreamableHttpServer {
   // This factory is public; callers can bypass loadTransportConfig().
   assertHttpListenerConfig(config.host, config.port, true);
+  assertLoopbackListener(config.host);
+  if (config.oidc) assertOidcConfig(config.oidc);
 
+  const authenticator = config.oidc ? createOidcAuthenticator(config.oidc) : undefined;
   const sessions = new Map<string, Session>();
   const activeSessions = new Set<Session>();
   let ready = false;
   let closed = false;
+  let expirySweepRunning = false;
+
+  async function cleanupExpiredSessions(): Promise<void> {
+    if (expirySweepRunning) return;
+    expirySweepRunning = true;
+    try {
+      const now = Date.now();
+      const expired = [...activeSessions].filter(
+        (session) =>
+          now - session.lastActivityAt >= SESSION_IDLE_TIMEOUT_MS ||
+          now - session.createdAt >= SESSION_ABSOLUTE_TIMEOUT_MS,
+      );
+      await Promise.allSettled(expired.map((session) => session.server.close()));
+      for (const session of expired) {
+        sessions.delete(session.id);
+        activeSessions.delete(session);
+      }
+    } finally {
+      expirySweepRunning = false;
+    }
+  }
+
+  const expiryTimer = setInterval(
+    () => void cleanupExpiredSessions(),
+    SESSION_EXPIRY_SWEEP_MS,
+  );
+  expiryTimer.unref();
 
   const nodeServer = createServer((request, response) => {
     void handleRequest(request, response).catch(() => {
@@ -151,6 +211,10 @@ export function createStreamableHttpServer(
       return;
     }
 
+    const principal = await authenticateRequest(request, response, authenticator);
+    if (principal === undefined && authenticator) return;
+    await cleanupExpiredSessions();
+
     const sessionId = request.headers["mcp-session-id"];
     const id = typeof sessionId === "string" ? sessionId : undefined;
     if (request.method === "POST") {
@@ -173,6 +237,12 @@ export function createStreamableHttpServer(
       }
       const existing = id ? sessions.get(id) : undefined;
       if (existing) {
+        if (!samePrincipal(existing.principal, principal)) {
+          request.resume();
+          writeAuthenticationError(response, 401);
+          return;
+        }
+        existing.lastActivityAt = Date.now();
         await existing.transport.handleRequest(request, response, body);
         return;
       }
@@ -189,7 +259,16 @@ export function createStreamableHttpServer(
         writeJsonRpcError(response, 503, -32000, "MCP session limit reached");
         return;
       }
-      await createSession(body, request, response);
+      if (
+        principal &&
+        [...activeSessions].filter((session) =>
+          samePrincipal(session.principal, principal),
+        ).length >= MAX_SESSIONS_PER_PRINCIPAL
+      ) {
+        writeJsonRpcError(response, 429, -32000, "MCP principal session limit reached");
+        return;
+      }
+      await createSession(body, request, response, principal);
       return;
     }
 
@@ -202,6 +281,12 @@ export function createStreamableHttpServer(
       writeJsonRpcError(response, 404, -32001, "Session not found");
       return;
     }
+    if (!samePrincipal(session.principal, principal)) {
+      request.resume();
+      writeAuthenticationError(response, 401);
+      return;
+    }
+    session.lastActivityAt = Date.now();
     await session.transport.handleRequest(request, response);
   }
 
@@ -249,12 +334,17 @@ export function createStreamableHttpServer(
     body: unknown,
     request: IncomingMessage,
     response: ServerResponse,
+    principal: OidcPrincipal | undefined,
   ): Promise<void> {
     const id = randomUUID();
     const server = createMcpServer();
+    const now = Date.now();
     const session: Session = {
       id,
       server,
+      createdAt: now,
+      lastActivityAt: now,
+      ...(principal ? { principal } : {}),
       transport: new StreamableHTTPServerTransport({
         sessionIdGenerator: () => id,
         allowedHosts: allowedHosts(),
@@ -302,6 +392,7 @@ export function createStreamableHttpServer(
       if (closed) return;
       closed = true;
       ready = false;
+      clearInterval(expiryTimer);
       const active = [...activeSessions];
       await Promise.allSettled(active.map((session) => session.server.close()));
       for (const session of active) {
@@ -314,6 +405,53 @@ export function createStreamableHttpServer(
     isReady: () => ready,
     sessionCount: () => sessions.size,
   };
+}
+
+async function authenticateRequest(
+  request: IncomingMessage,
+  response: ServerResponse,
+  authenticator: OidcAuthenticator | undefined,
+): Promise<OidcPrincipal | undefined> {
+  if (!authenticator) return undefined;
+  try {
+    return await authenticator.authenticate(request.headers.authorization);
+  } catch (error) {
+    request.resume();
+    writeAuthenticationError(
+      response,
+      error instanceof OidcAuthenticationError ? error.status : 503,
+    );
+    return undefined;
+  }
+}
+
+function samePrincipal(
+  sessionPrincipal: OidcPrincipal | undefined,
+  requestPrincipal: OidcPrincipal | undefined,
+): boolean {
+  return (
+    sessionPrincipal?.issuer === requestPrincipal?.issuer &&
+    sessionPrincipal?.subject === requestPrincipal?.subject
+  );
+}
+
+function writeAuthenticationError(
+  response: ServerResponse,
+  status: 401 | 403 | 503,
+): void {
+  const message =
+    status === 403
+      ? "Forbidden"
+      : status === 503
+        ? "Service unavailable"
+        : "Unauthorized";
+  writeJsonRpcError(
+    response,
+    status,
+    -32000,
+    message,
+    status === 401 ? { "www-authenticate": "Bearer" } : undefined,
+  );
 }
 
 class RequestTooLargeError extends Error {}

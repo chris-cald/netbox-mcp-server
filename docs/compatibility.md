@@ -5,10 +5,10 @@ please open an issue.
 
 ## Runtime
 
-|           | Supported                                                                                        |
-| --------- | ------------------------------------------------------------------------------------------------ |
-| Node.js   | 20.11 LTS and newer. Node 18 is end-of-life and is not supported.                                |
-| Transport | **stdio**, plus loopback-only Streamable HTTP at `/mcp` when `NETBOX_TRANSPORT=http` (until M6). |
+|           | Supported                                                                                                                                |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| Node.js   | 20.11 LTS and newer. Node 18 is end-of-life and is not supported.                                                                        |
+| Transport | **stdio**, plus loopback-only Streamable HTTP at `/mcp` when `NETBOX_TRANSPORT=http`; public HTTP is deferred pending TLS/proxy support. |
 
 ### Platforms and architectures
 
@@ -76,9 +76,10 @@ Deleting the cache directory is safe: the next call re-fetches.
 | ChatGPT connectors | **Not supported** | Requires a public authenticated HTTP transport.             |
 | Grok connectors    | **Not supported** | Same reason.                                                |
 
-`NETBOX_TRANSPORT=http` provides Streamable HTTP at `/mcp` for local integration,
-but it rejects non-loopback listener addresses until M6 adds gateway authentication.
-It does not make remote HTTP-only clients supported.
+`NETBOX_TRANSPORT=http` provides Streamable HTTP at `/mcp` on loopback only. Optional
+OIDC validates a Bearer access token on every MCP request for local clients. Public HTTP,
+including wildcard binds, remains deferred until a TLS-terminating proxy/TLS milestone;
+this is not a hosted connector service.
 
 ## NetBox
 
@@ -181,7 +182,7 @@ search will attempt that endpoint on an instance without the plugin.
 ## Known limitations
 
 - **Stock available-IPs allocation E2E is blocked on unpatched NetBox 4.6.7.** See the patched local fixture note above; gateway response validation is intentionally not relaxed.
-- **No public authenticated HTTP transport.** Streamable HTTP is loopback-only until M6; see the client table above.
+- **No public HTTP, OIDC discovery, or proxy integration.** HTTP is loopback-only until a TLS-terminating proxy/TLS milestone; the listener does not trust forwarded headers, cookies, or CORS.
 - **A write costs several calls.** The layered design trades round-trips for
   context. Measured against a live instance: a trivial read is 1 call, and
   creating a device with three prerequisites is 6, five of them before the
