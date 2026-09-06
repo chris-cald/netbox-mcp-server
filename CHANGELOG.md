@@ -12,6 +12,14 @@ surface may change in a minor release, with the change noted here.
 
 ### Added
 
+- **Container operations profile.** A multi-stage, non-root Docker image now
+  carries OCI version/revision/created metadata. The separate Compose
+  `deployment` profile consumes a mounted token file, makes its root filesystem
+  read-only, drops Linux capabilities, and checks loopback `/healthz` and
+  `/readyz`; it deliberately publishes no port. CI builds and starts that
+  profile with an ephemeral file-backed dummy secret, while the disposable
+  NetBox E2E fixture remains separate. Public HTTP remains unavailable.
+
 - **Loopback-only Streamable HTTP MCP transport with optional OIDC.** Set
   `NETBOX_TRANSPORT=http` to serve MCP at `/mcp` and unauthenticated `/healthz`
   and `/readyz` probes on `127.0.0.1` (or `::1`). Public and wildcard HTTP binds

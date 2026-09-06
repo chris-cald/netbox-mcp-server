@@ -1,0 +1,9 @@
+# Send only what the build stage needs. In particular, never send local .env
+# files, secret mounts, an existing dist/ directory, or the Git history to the
+# Docker daemon.
+**
+!package.json
+!package-lock.json
+!tsconfig.json
+!src/
+!src/**

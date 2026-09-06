@@ -283,6 +283,21 @@ The honest source is [`docs/compatibility.md`](docs/compatibility.md). In short:
 
 ---
 
+## Container deployment
+
+[`docs/container-deployment.md`](docs/container-deployment.md) documents the
+operator-only Compose `deployment` profile. It builds a non-root, read-only
+container and takes the NetBox credential solely from a mounted
+`NETBOX_TOKEN_FILE` secret; `compose.yaml` contains no token value.
+
+Its HTTP port is deliberately **not published**. The profile binds HTTP to
+container loopback only so its `/healthz` and `/readyz` probes can run. Public HTTP remains
+unavailable. Do not add a port mapping, reverse proxy, or tunnel:
+remote HTTP-only clients are unsupported. Stdio remains the normal deployment.
+The disposable E2E NetBox fixture stays separate in `docker-compose.e2e.yml`.
+
+---
+
 ## Building from a clone
 
 For contributors, and for machines that cannot reach the npm registry:
