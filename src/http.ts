@@ -1,4 +1,4 @@
-/** Streamable HTTP transport is loopback-only until TLS/proxy support ships. */
+/** Streamable HTTP transport; container networking controls listener exposure. */
 
 import { randomUUID } from "node:crypto";
 import {
@@ -23,7 +23,7 @@ import {
 } from "./oidc.js";
 import { buildServer } from "./server.js";
 
-const DEFAULT_HTTP_HOST = "127.0.0.1";
+const DEFAULT_HTTP_HOST = "0.0.0.0";
 const DEFAULT_HTTP_PORT = 3000;
 const MAX_REQUEST_BYTES = 1024 * 1024;
 const MAX_SESSIONS = 100;
@@ -52,14 +52,10 @@ export function loadTransportConfig(
     throw new Error("NETBOX_TRANSPORT must be either stdio or http.");
   }
 
-  const host = (env.NETBOX_HTTP_HOST ?? DEFAULT_HTTP_HOST).trim();
-  const rawPort = (env.NETBOX_HTTP_PORT ?? String(DEFAULT_HTTP_PORT)).trim();
-  if (!/^\d+$/.test(rawPort)) {
-    throw new Error("NETBOX_HTTP_PORT must be an integer from 1 through 65535.");
-  }
-  const port = Number(rawPort);
-  assertHttpListenerConfig(host, port);
-  assertLoopbackListener(host);
+  // HTTP runs on the conventional container port. Compose (or another runtime)
+  // chooses whether and where that port is published.
+  const host = DEFAULT_HTTP_HOST;
+  const port = DEFAULT_HTTP_PORT;
   const oidc = loadOidcConfig(env, false);
   return { transport: "http", host, port, ...(oidc ? { oidc } : {}) };
 }
@@ -74,25 +70,6 @@ function assertHttpListenerConfig(
   }
   if (!Number.isSafeInteger(port) || port < (allowPortZero ? 0 : 1) || port > 65535) {
     throw new Error("NETBOX_HTTP_PORT must be an integer from 1 through 65535.");
-  }
-}
-
-function isLoopbackAddress(host: string): boolean {
-  const version = isIP(host);
-  if (version === 4) return host.split(".")[0] === "127";
-  return version === 6 && host === "::1";
-}
-
-function assertLoopbackListener(host: string): void {
-  if (host === "0.0.0.0" || host === "::") {
-    throw new Error(
-      "NETBOX_HTTP_HOST must not be a wildcard address; public HTTP is deferred until TLS/proxy support ships.",
-    );
-  }
-  if (!isLoopbackAddress(host)) {
-    throw new Error(
-      "NETBOX_HTTP_HOST must be a loopback IP address; public HTTP is deferred until TLS/proxy support ships.",
-    );
   }
 }
 
@@ -119,7 +96,6 @@ export function createStreamableHttpServer(
 ): StreamableHttpServer {
   // This factory is public; callers can bypass loadTransportConfig().
   assertHttpListenerConfig(config.host, config.port, true);
-  assertLoopbackListener(config.host);
   if (config.oidc) assertOidcConfig(config.oidc);
 
   const authenticator = config.oidc ? createOidcAuthenticator(config.oidc) : undefined;
@@ -295,7 +271,7 @@ export function createStreamableHttpServer(
     response: ServerResponse,
   ): boolean {
     const host = request.headers.host;
-    if (host && allowedHosts().includes(host)) return true;
+    if (host && (config.host === "0.0.0.0" || allowedHosts().includes(host))) return true;
     request.resume();
     writeJsonRpcError(response, 403, -32000, `Invalid Host header: ${host}`);
     return false;

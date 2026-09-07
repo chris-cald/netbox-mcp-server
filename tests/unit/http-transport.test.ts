@@ -88,35 +88,28 @@ describe("HTTP transport configuration", () => {
     expect(loadTransportConfig({})).toEqual({ transport: "stdio" });
   });
 
-  it("uses a loopback HTTP listener by default", () => {
+  it("uses the conventional container port and wildcard listener", () => {
     expect(loadTransportConfig({ NETBOX_TRANSPORT: "http" })).toEqual({
       transport: "http",
-      host: "127.0.0.1",
+      host: "0.0.0.0",
       port: 3000,
     });
   });
 
-  it("rejects public and wildcard HTTP listeners even when OIDC is configured", () => {
+  it("lets the container runtime control network exposure", () => {
     expect(() => loadTransportConfig({ NETBOX_TRANSPORT: "sse" })).toThrow(
       /NETBOX_TRANSPORT/,
     );
-    for (const host of ["0.0.0.0", "::", "192.0.2.1"]) {
-      expect(() =>
-        loadTransportConfig({
-          NETBOX_TRANSPORT: "http",
-          NETBOX_HTTP_HOST: host,
-          NETBOX_OIDC_ISSUER: "https://issuer.example.com",
-          NETBOX_OIDC_JWKS_URL: "https://issuer.example.com/jwks",
-          NETBOX_OIDC_AUDIENCE: "netbox-mcp",
-        }),
-      ).toThrow(/public HTTP is deferred/);
-    }
+    expect(
+      loadTransportConfig({
+        NETBOX_TRANSPORT: "http",
+        NETBOX_HTTP_HOST: "192.0.2.1",
+        NETBOX_HTTP_PORT: "65536",
+      }),
+    ).toEqual({ transport: "http", host: "0.0.0.0", port: 3000 });
     expect(() =>
-      loadTransportConfig({ NETBOX_TRANSPORT: "http", NETBOX_HTTP_PORT: "65536" }),
-    ).toThrow(/NETBOX_HTTP_PORT/);
-    expect(() =>
-      createStreamableHttpServer({ transport: "http", host: "0.0.0.0", port: 3000 }),
-    ).toThrow(/wildcard address/);
+      createStreamableHttpServer({ transport: "http", host: "0.0.0.0", port: 0 }),
+    ).not.toThrow();
   });
 
   it("sets conservative Node request timeouts", () => {

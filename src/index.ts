@@ -41,11 +41,9 @@ const HELP = [
   "                      This exposes the token to anyone able to intercept the",
   "                      connection. Prefer installing your internal root CA.",
   "  NETBOX_TRANSPORT    stdio (default) or http.",
-  "  NETBOX_HTTP_HOST    Loopback HTTP listener IP address (default: 127.0.0.1).",
-  "  NETBOX_HTTP_PORT    HTTP listener port (default: 3000).",
-  "  NETBOX_OIDC_ISSUER  Optional canonical HTTPS issuer for loopback HTTP.",
-  "  NETBOX_OIDC_JWKS_URL Optional canonical HTTPS JWKS URL for loopback HTTP.",
-  "  NETBOX_OIDC_AUDIENCE Optional exact access-token audience for loopback HTTP.",
+  "  NETBOX_OIDC_ISSUER  Optional canonical HTTPS issuer for HTTP Bearer authentication.",
+  "  NETBOX_OIDC_JWKS_URL Optional canonical HTTPS JWKS URL for HTTP Bearer authentication.",
+  "  NETBOX_OIDC_AUDIENCE Optional exact access-token audience for HTTP Bearer authentication.",
   "  NETBOX_OIDC_REQUIRED_SCOPE Optional required access-token scope.",
   "",
   "NETBOX_TOKEN_FILE is read before every NetBox request so token rotation takes",
@@ -56,9 +54,9 @@ const HELP = [
   "permissions, if the assistant should not be able to change anything. That",
   "is enforced by NetBox, where no tool argument can reach it.",
   "",
-  "Transport: stdio by default, or loopback-only Streamable HTTP at /mcp when NETBOX_TRANSPORT=http.",
-  "Loopback HTTP may be unauthenticated or use OIDC Bearer tokens. Public HTTP is deferred",
-  "until TLS-terminating proxy/TLS support ships; /healthz and /readyz remain minimal probes.",
+  "Transport: stdio by default, or Streamable HTTP on port 3000 at /mcp when NETBOX_TRANSPORT=http.",
+  "Your runtime controls port exposure. Use TLS, authentication, and network policy for any",
+  "network-reachable deployment; /healthz and /readyz remain minimal probes.",
 ].join("\n");
 
 async function validateNetBoxConfig(): Promise<void> {

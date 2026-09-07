@@ -18,10 +18,11 @@ describe("production container deployment", () => {
     expect(dockerfile).toContain("org.opencontainers.image.created");
   });
 
-  it("keeps the deployment profile loopback-only and uses a mounted token file", () => {
+  it("leaves deployment exposure to Compose and uses a mounted token file", () => {
     expect(compose).toContain('profiles: ["deployment"]');
     expect(compose).toContain("NETBOX_TRANSPORT: http");
-    expect(compose).toContain("NETBOX_HTTP_HOST: 127.0.0.1");
+    expect(compose).not.toContain("NETBOX_HTTP_HOST");
+    expect(compose).not.toContain("NETBOX_HTTP_PORT");
     expect(compose).toContain("NETBOX_TOKEN_FILE: /run/secrets/netbox_token");
     expect(compose).toMatch(/secrets:\s*\n\s+netbox_token:/);
     expect(compose).not.toMatch(/^\s*ports:/m);
