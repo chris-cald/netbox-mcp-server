@@ -102,39 +102,120 @@ Do not publish a port until the gateway is running with OIDC and a firewall rule
 limits its published port to NPM. Host validation is DNS-rebinding protection,
 not access control.
 
-1. In Authentik, create an OAuth2/OIDC provider and application for this MCP
-   resource. Configure an access-token audience and scope (for example,
-   `netbox-mcp` and `mcp`), then obtain these **non-secret** values from its
-   discovery document or provider settings: issuer, JWKS URL, audience, and
-   required scope. Do not put a client secret, access token, or private key in
-   Compose, NPM, or this repository.
-2. Choose the final HTTPS URL, for example `https://mcp.example.com/mcp`. Set
-   `NETBOX_OIDC_RESOURCE_URL` to that exact URL. Add `mcp.example.com` to
-   `NETBOX_HTTP_ALLOWED_HOSTS` (no `:443` for default HTTPS) alongside any
-   retained private host values. The resource URL and forwarded `Host` must
-   agree exactly.
-3. For a virtual path beneath an existing site, use the exact resource URL (for
-   example, `https://netbox.calan.co/mcp`) and add `netbox.calan.co` to the
-   allowed hosts. In NPM, add **two** path routes to
-   `http://home.calan.lan:8765` without rewriting either URI: `/mcp` and
-   `/.well-known/oauth-protected-resource/mcp`. Leave the existing NetBox route
-   as the default route. Preserve `Host: netbox.calan.co`; the gateway rejects a
-   different forwarded host.
-4. Do not place these two MCP paths behind Authentik proxy/cookie authentication
-   or an NPM access-list redirect: OAuth clients need the gateway's JSON `401`
-   Bearer `resource_metadata` challenge. The gateway itself validates Authentik
-   access tokens. Reuse the Authentik instance if desired, but prefer a separate
-   OAuth2/OIDC provider/application (or at least a separate client, audience,
-   and `mcp` scope) rather than broadening NetBox's existing client privileges.
-5. Restrict `home.calan.lan:8765` at the host firewall to NPM’s source address.
-   Do not forward it to the Internet or configure a tunnel. Keep `/healthz` and
-   `/readyz` private as well.
-6. Verify before enabling a connector: the protected-resource metadata endpoint
-   returns its exact resource URL and Authentik issuer; an MCP request without a
-   token returns `401` with `resource_metadata`; a valid scoped token succeeds;
-   expired, wrong-audience, and missing-scope tokens fail; and the NetBox API
-   sees only its configured server token, never the caller Bearer token.
+### Recommended Authentik boundary
 
-The resource metadata endpoint is
-`/.well-known/oauth-protected-resource/mcp`. It lets OAuth-aware clients discover
-the Authentik authorization server from the `401` Bearer challenge.
+Create a **separate Application and OAuth2/OIDC Provider** for MCP. Do not extend
+NetBox's existing provider/client: separate provider settings isolate the MCP
+client ID, audience, scope, authorization policy, consent history, token lifetime,
+and revocation from the NetBox UI. A provider without an Application is possible,
+but the Authentik combined Application + Provider workflow is the maintainable
+choice.
+
+In **Applications → Applications → Create**, use these values:
+
+| Field               | Recommended value                                                                                                                                   | Why                                                                    |
+| ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
+| Application name    | `NetBox MCP`                                                                                                                                        | Distinct operator and user-facing identity.                            |
+| Application slug    | `netbox-mcp`                                                                                                                                        | Produces the default per-provider discovery path.                      |
+| Provider type       | `OAuth2/OIDC`                                                                                                                                       | The gateway validates OAuth Bearer access tokens.                      |
+| Provider name       | `netbox-mcp`                                                                                                                                        | Keeps application and provider ownership obvious.                      |
+| Client type         | Match the connector; use public + PKCE for a native/public client, confidential only where the client can protect its secret.                       | The gateway never needs the client secret.                             |
+| Authorization grant | Authorization Code with PKCE/S256; disable the OAuth implicit grant.                                                                                | Avoids browser-token leakage.                                          |
+| Authorization flow  | **Explicit consent** for third-party/user-facing connectors; implicit consent only for a tightly controlled first-party client after policy review. | This Authentik setting controls consent, not the OAuth implicit grant. |
+| Issuer mode         | Per-provider/default.                                                                                                                               | Produces an isolated issuer and discovery document.                    |
+| Signing             | RS256 or ES256 JWS; do not enable JWE encryption.                                                                                                   | The gateway accepts RS256/ES256 signed JWTs, not encrypted JWTs.       |
+| Access policy       | Bind only intended groups/users.                                                                                                                    | NetBox MCP may expose infrastructure data and writes.                  |
+
+Create a provider scope mapping named `mcp`, attach it to this provider, and
+require clients to request it. Configure the provider's access-token audience
+claim/claim mapping to emit exactly `netbox-mcp` (or choose another stable,
+MCP-only value and use it consistently below). The audience and scope belong to
+the **MCP provider**, not the NetBox application or NPM.
+
+Add only connector-supplied, exact redirect URIs to the provider. Do not use
+wildcards. If a connector requires client registration or a redirect URI not yet
+known, stop there and obtain it from that connector's documentation; do not guess
+or weaken redirect validation.
+
+### Derive the gateway settings
+
+After creating the provider, open its OpenID Connect discovery document, normally
+at:
+
+```text
+https://AUTHENTIK_HOST/application/o/netbox-mcp/.well-known/openid-configuration
+```
+
+Copy the document's `issuer` and `jwks_uri` values; they are public, non-secret
+URLs. The authorization and token endpoints remain Authentik client settings and
+are not gateway environment variables. For a virtual MCP path under NetBox, use:
+
+```text
+NETBOX_HTTP_ALLOWED_HOSTS=home:8765,home.calan.lan:8765,netbox.calan.co
+NETBOX_OIDC_ISSUER=<discovery issuer>
+NETBOX_OIDC_JWKS_URL=<discovery jwks_uri>
+NETBOX_OIDC_AUDIENCE=netbox-mcp
+NETBOX_OIDC_REQUIRED_SCOPE=mcp
+NETBOX_OIDC_RESOURCE_URL=https://netbox.calan.co/mcp
+```
+
+Before deployment, verify a locally decoded test access token has an exact `iss`,
+`aud`, `scope` containing `mcp`, numeric `exp`, and nonempty `sub` matching those
+values. Do not paste the token into a terminal command line, a config file, or a
+support ticket. Never place an Authentik client secret, JWT, refresh token, or
+private signing key in Compose, NPM, or this repository.
+
+### NPM virtual-path configuration
+
+Keep the existing `netbox.calan.co` Proxy Host and its NetBox default route. Do
+not replace its forward host with the MCP gateway.
+
+In that Proxy Host's **Custom Locations**, add both routes below. For each, set
+**Forward Scheme** `http`, **Forward Hostname/IP** `home.calan.lan`, and **Forward
+Port** `8765`:
+
+| Location                                    | Purpose                               |
+| ------------------------------------------- | ------------------------------------- |
+| `/mcp`                                      | Streamable HTTP MCP endpoint.         |
+| `/.well-known/oauth-protected-resource/mcp` | RFC 9728 protected-resource metadata. |
+
+Do not rewrite either location, append or remove a slash, or set a different Host
+header. Enable Websockets Support on the Proxy Host and keep its existing TLS
+certificate/Force SSL settings. In each location's Advanced configuration, add
+only directives NPM does not already set:
+
+```nginx
+proxy_http_version 1.1;
+proxy_buffering off;
+proxy_request_buffering off;
+proxy_set_header Host $host;
+proxy_set_header Authorization $http_authorization;
+proxy_set_header X-Forwarded-Proto $scheme;
+```
+
+Do **not** add `proxy_pass` in the advanced field: NPM generates it from the
+Custom Location fields. Do not use an NPM Access List or Authentik proxy/cookie
+redirect for either MCP location. OAuth clients must receive the gateway's JSON
+`401` Bearer `resource_metadata` challenge. If the existing NetBox authentication
+configuration cannot exempt both paths, use a separate HTTPS hostname instead of
+silently accepting redirects.
+
+### Network restriction and verification
+
+Restrict `home.calan.lan:8765` at the host firewall to NPM's source address only.
+Do not forward it to the Internet or configure a tunnel. Keep `/healthz` and
+`/readyz` private.
+
+Before enabling a connector, verify:
+
+1. `https://netbox.calan.co/.well-known/oauth-protected-resource/mcp` returns
+   resource `https://netbox.calan.co/mcp` and the expected Authentik issuer.
+2. `POST https://netbox.calan.co/mcp` without a Bearer token returns `401` with
+   `WWW-Authenticate: Bearer resource_metadata=...`, not an HTML login redirect.
+3. A valid scoped token succeeds; expired, wrong-audience, and missing-scope
+   tokens fail.
+4. The NetBox API sees only its configured server token, never the caller Bearer
+   token.
+
+The resource metadata endpoint lets OAuth-aware clients discover the Authentik
+authorization server from the `401` Bearer challenge.

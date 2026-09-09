@@ -6,6 +6,7 @@ const dockerfile = readFileSync("Dockerfile", "utf8");
 const compose = readFileSync("compose.yaml", "utf8");
 const dockerignore = readFileSync(".dockerignore", "utf8");
 const readme = readFileSync("README.md", "utf8");
+const containerDeployment = readFileSync("docs/container-deployment.md", "utf8");
 const ci = readFileSync(".github/workflows/ci.yml", "utf8");
 
 describe("production container deployment", () => {
@@ -55,6 +56,21 @@ describe("production container deployment", () => {
     expect(readme).toContain("NETBOX_HTTP_ALLOWED_HOSTS");
     expect(readme).toMatch(/not authentication/i);
     expect(readme).toMatch(/TLS, OIDC, and firewall/i);
+  });
+
+  it("documents isolated Authentik and NPM virtual-path setup without secrets", () => {
+    for (const detail of [
+      "separate Application and OAuth2/OIDC Provider",
+      "Authorization Code with PKCE/S256",
+      "NETBOX_OIDC_RESOURCE_URL=https://netbox.calan.co/mcp",
+      "NETBOX_HTTP_ALLOWED_HOSTS=home:8765,home.calan.lan:8765,netbox.calan.co",
+      "/.well-known/oauth-protected-resource/mcp",
+      "proxy_set_header Authorization $http_authorization",
+      "Do **not** add `proxy_pass`",
+    ]) {
+      expect(containerDeployment).toContain(detail);
+    }
+    expect(containerDeployment).toMatch(/Never place an Authentik client secret, JWT/i);
   });
 
   it("runs container build and Compose configuration gates in CI", () => {
