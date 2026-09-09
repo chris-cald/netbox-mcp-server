@@ -5,10 +5,10 @@ please open an issue.
 
 ## Runtime
 
-|           | Supported                                                                                                                                |
-| --------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
-| Node.js   | 20.11 LTS and newer. Node 18 is end-of-life and is not supported.                                                                        |
-| Transport | **stdio**, plus loopback-only Streamable HTTP at `/mcp` when `NETBOX_TRANSPORT=http`; public HTTP is deferred pending TLS/proxy support. |
+|           | Supported                                                                                                                              |
+| --------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Node.js   | 20.11 LTS and newer. Node 18 is end-of-life and is not supported.                                                                      |
+| Transport | **stdio**, plus operator-managed Streamable HTTP at `/mcp` when `NETBOX_TRANSPORT=http` and `NETBOX_HTTP_ALLOWED_HOSTS` is configured. |
 
 ### Platforms and architectures
 
@@ -76,10 +76,11 @@ Deleting the cache directory is safe: the next call re-fetches.
 | ChatGPT connectors | **Not supported** | Requires a public authenticated HTTP transport.             |
 | Grok connectors    | **Not supported** | Same reason.                                                |
 
-`NETBOX_TRANSPORT=http` provides Streamable HTTP at `/mcp` on loopback only. Optional
-OIDC validates a Bearer access token on every MCP request for local clients. Public HTTP,
-including wildcard binds, remains deferred until a TLS-terminating proxy/TLS milestone;
-this is not a hosted connector service.
+`NETBOX_TRANSPORT=http` provides Streamable HTTP at `/mcp` on container port 3000. It
+requires `NETBOX_HTTP_ALLOWED_HOSTS` for DNS-rebinding protection; that policy is not
+authentication. Optional OIDC validates a Bearer access token on every MCP request. Any
+published deployment must also use TLS and firewall or network policy; this is not a
+hosted connector service.
 
 ## NetBox
 
@@ -182,7 +183,7 @@ search will attempt that endpoint on an instance without the plugin.
 ## Known limitations
 
 - **Stock available-IPs allocation E2E is blocked on unpatched NetBox 4.6.7.** See the patched local fixture note above; gateway response validation is intentionally not relaxed.
-- **No public HTTP, OIDC discovery, or proxy integration.** HTTP is loopback-only until a TLS-terminating proxy/TLS milestone; the listener does not trust forwarded headers, cookies, or CORS.
+- **No OIDC discovery or proxy integration.** The listener does not trust forwarded headers, cookies, or CORS. Operators who publish HTTP must supply TLS, OIDC, firewall or network policy, and explicit allowed hosts.
 - **A write costs several calls.** The layered design trades round-trips for
   context. Measured against a live instance: a trivial read is 1 call, and
   creating a device with three prerequisites is 6, five of them before the

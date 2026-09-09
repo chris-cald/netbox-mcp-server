@@ -23,6 +23,7 @@ describe("production container deployment", () => {
     expect(compose).toContain("NETBOX_TRANSPORT: http");
     expect(compose).not.toContain("NETBOX_HTTP_HOST");
     expect(compose).not.toContain("NETBOX_HTTP_PORT");
+    expect(compose).toContain("NETBOX_HTTP_ALLOWED_HOSTS");
     expect(compose).toContain("NETBOX_TOKEN_FILE: /run/secrets/netbox_token");
     expect(compose).toMatch(/secrets:\s*\n\s+netbox_token:/);
     expect(compose).not.toMatch(/^\s*ports:/m);
@@ -39,11 +40,12 @@ describe("production container deployment", () => {
     expect(compose).toContain("/readyz");
   });
 
-  it("documents the environment and secret boundary without advertising public HTTP", () => {
+  it("documents the Host policy and network security boundary", () => {
     expect(readme).toContain("## Container deployment");
     expect(readme).toContain("NETBOX_TOKEN_FILE");
-    expect(readme).toContain("not published");
-    expect(readme).toMatch(/public HTTP\s+remains\s+unavailable/i);
+    expect(readme).toContain("NETBOX_HTTP_ALLOWED_HOSTS");
+    expect(readme).toMatch(/not authentication/i);
+    expect(readme).toMatch(/TLS, OIDC, and firewall/i);
   });
 
   it("runs container build and Compose configuration gates in CI", () => {

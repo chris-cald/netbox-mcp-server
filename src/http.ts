@@ -40,7 +40,13 @@ type McpServer = ReturnType<typeof buildServer>;
 
 export type TransportConfig =
   | { transport: "stdio" }
-  | { transport: "http"; host: string; port: number; oidc?: OidcConfig | undefined };
+  | {
+      transport: "http";
+      host: string;
+      port: number;
+      allowedHosts: string[];
+      oidc?: OidcConfig | undefined;
+    };
 
 /** Parse only transport configuration; NetBox credentials stay in config.ts. */
 export function loadTransportConfig(
@@ -56,8 +62,69 @@ export function loadTransportConfig(
   // chooses whether and where that port is published.
   const host = DEFAULT_HTTP_HOST;
   const port = DEFAULT_HTTP_PORT;
+  const allowedHosts = loadAllowedHosts(env);
   const oidc = loadOidcConfig(env, false);
-  return { transport: "http", host, port, ...(oidc ? { oidc } : {}) };
+  return { transport: "http", host, port, allowedHosts, ...(oidc ? { oidc } : {}) };
+}
+
+function loadAllowedHosts(env: NodeJS.ProcessEnv): string[] {
+  const raw = env.NETBOX_HTTP_ALLOWED_HOSTS?.trim();
+  if (!raw) {
+    throw new Error(
+      "NETBOX_HTTP_ALLOWED_HOSTS is required when NETBOX_TRANSPORT=http; set comma-separated published Host values.",
+    );
+  }
+  const allowedHosts = [
+    ...new Set(raw.split(",").map((host) => host.trim().toLowerCase())),
+  ];
+  if (allowedHosts.some((host) => !isValidHostHeader(host))) {
+    throw new Error(
+      "NETBOX_HTTP_ALLOWED_HOSTS must be comma-separated hostnames or IP addresses with optional ports.",
+    );
+  }
+  return allowedHosts;
+}
+
+interface ParsedHostHeader {
+  hostname: string;
+  port: string;
+}
+
+function parseHostHeader(host: string): ParsedHostHeader | undefined {
+  const match = /^(?:\[([a-f\d:.]+)\]|([a-z\d.-]+))(?::(\d+))?$/i.exec(host);
+  if (!match) return undefined;
+  const port = match[3] ? Number(match[3]) : undefined;
+  if (port !== undefined && (!Number.isSafeInteger(port) || port < 1 || port > 65535)) {
+    return undefined;
+  }
+  try {
+    const parsed = new URL(`http://${host}`);
+    return {
+      hostname: parsed.hostname.toLowerCase(),
+      port: port === undefined ? "" : String(port),
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+function isValidHostHeader(host: string): boolean {
+  return parseHostHeader(host) !== undefined;
+}
+
+function matchesAllowedHost(host: string, allowedHosts: string[]): boolean {
+  const requested = parseHostHeader(host);
+  return (
+    !!requested &&
+    allowedHosts.some((allowedHost) => {
+      const allowed = parseHostHeader(allowedHost);
+      return (
+        !!allowed &&
+        allowed.hostname === requested.hostname &&
+        (!allowed.port || allowed.port === requested.port)
+      );
+    })
+  );
 }
 
 function assertHttpListenerConfig(
@@ -96,6 +163,9 @@ export function createStreamableHttpServer(
 ): StreamableHttpServer {
   // This factory is public; callers can bypass loadTransportConfig().
   assertHttpListenerConfig(config.host, config.port, true);
+  if (config.allowedHosts.length === 0) {
+    throw new Error("NETBOX_HTTP_ALLOWED_HOSTS must contain at least one Host value.");
+  }
   if (config.oidc) assertOidcConfig(config.oidc);
 
   const authenticator = config.oidc ? createOidcAuthenticator(config.oidc) : undefined;
@@ -142,15 +212,6 @@ export function createStreamableHttpServer(
   nodeServer.requestTimeout = HTTP_REQUEST_TIMEOUT_MS;
   // Keep post-listen socket errors from becoming an uncaught process exception.
   nodeServer.on("error", () => undefined);
-
-  const listenerPort = (): number => {
-    const address = nodeServer.address();
-    return address && typeof address !== "string" ? address.port : config.port;
-  };
-  const allowedHosts = (): string[] => {
-    const host = config.host.includes(":") ? `[${config.host}]` : config.host;
-    return [host, `${host}:${listenerPort()}`];
-  };
 
   async function handleRequest(
     request: IncomingMessage,
@@ -270,8 +331,8 @@ export function createStreamableHttpServer(
     request: IncomingMessage,
     response: ServerResponse,
   ): boolean {
-    const host = request.headers.host;
-    if (host && (config.host === "0.0.0.0" || allowedHosts().includes(host))) return true;
+    const host = request.headers.host?.toLowerCase();
+    if (host && matchesAllowedHost(host, config.allowedHosts)) return true;
     request.resume();
     writeJsonRpcError(response, 403, -32000, `Invalid Host header: ${host}`);
     return false;
@@ -323,8 +384,8 @@ export function createStreamableHttpServer(
       ...(principal ? { principal } : {}),
       transport: new StreamableHTTPServerTransport({
         sessionIdGenerator: () => id,
-        allowedHosts: allowedHosts(),
-        enableDnsRebindingProtection: true,
+        // Validate here because configured hosts may intentionally omit a port.
+        enableDnsRebindingProtection: false,
         onsessioninitialized: (sessionId) => {
           sessions.set(sessionId, session);
         },

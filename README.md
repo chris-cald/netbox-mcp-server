@@ -197,6 +197,7 @@ Set `NETBOX_URL` and exactly one token source. The default transport is stdio; o
 | `NETBOX_TOKEN_FILE`          | one of      | —       | Path to a readable regular file containing the token. It is mutually exclusive with `NETBOX_TOKEN` and is read before every NetBox request for rotation. |
 | `NETBOX_INSECURE`            | no          | off     | `1`/`true`/`yes`/`y`/`on` skips TLS certificate verification. Prefer installing your internal root CA.                                                   |
 | `NETBOX_TRANSPORT`           | no          | `stdio` | `stdio` (default) or `http`.                                                                                                                             |
+| `NETBOX_HTTP_ALLOWED_HOSTS`  | HTTP        | —       | Comma-separated published `Host` values; DNS-rebinding protection, not authentication.                                                                   |
 | `NETBOX_OIDC_ISSUER`         | no          | —       | Canonical HTTPS issuer for optional loopback Bearer authentication.                                                                                      |
 | `NETBOX_OIDC_JWKS_URL`       | with issuer | —       | Canonical HTTPS JWKS URL for optional loopback Bearer authentication.                                                                                    |
 | `NETBOX_OIDC_AUDIENCE`       | with issuer | —       | Exact nonempty JWT audience for optional loopback Bearer authentication.                                                                                 |
@@ -204,9 +205,9 @@ Set `NETBOX_URL` and exactly one token source. The default transport is stdio; o
 
 `NETBOX_TOKEN_FILE` is intended for server-side secret mounts. The path and file contents are never exposed through MCP, logs, or errors. A file that is missing, unreadable, not a regular file, or empty fails closed with a secret-safe configuration error. Keep using `NETBOX_TOKEN` in the client config examples above unless your MCP host can securely mount a token file.
 
-With `NETBOX_TRANSPORT=http`, the server exposes the MCP Streamable HTTP endpoint at `/mcp`, plus unauthenticated minimal `GET /healthz` and `GET /readyz` probes, on container port `3000`. Compose or another runtime decides whether that port is private, loopback-only, LAN-bound, or proxied. Optional OIDC validates signed RS256/ES256 Bearer access tokens (issuer, audience, required expiry and subject, and optional scope) on every MCP request. Caller Bearer tokens are never used as NetBox credentials.
+With `NETBOX_TRANSPORT=http`, set `NETBOX_HTTP_ALLOWED_HOSTS` to the comma-separated published `Host` values (for example, `10.10.0.139:8765` or `mcp.example.com`). The server exposes MCP at `/mcp`, plus unauthenticated minimal `GET /healthz` and `GET /readyz` probes, on container port `3000`. Compose or another runtime decides whether that port is private, loopback-only, LAN-bound, or proxied. Optional OIDC validates signed RS256/ES256 Bearer access tokens (issuer, audience, required expiry and subject, and optional scope) on every MCP request. Caller Bearer tokens are never used as NetBox credentials.
 
-> **Critical security note:** Publishing the HTTP port is an operator deployment decision. For any network-reachable deployment, use TLS, authentication (preferably OIDC), and firewall or network policy appropriate to the environment. A NetBox token's permissions control what an authenticated MCP caller can change. Project maintainers and supporters do not operate, monitor, or secure deployments outside their control.
+> **Critical security note:** The allowed-host policy prevents DNS rebinding; it is **not authentication**, because a direct client can forge `Host`. Publishing the HTTP port requires TLS, OIDC, and firewall or network policy appropriate to the environment. An unauthenticated LAN-published endpoint is unsafe. A NetBox token's permissions control what an authenticated MCP caller can change. Project maintainers and supporters do not operate, monitor, or secure deployments outside their control.
 
 The instance's OpenAPI document is fetched once and cached on disk under
 `$XDG_CACHE_HOME/netbox-mcp` (or `~/.cache/netbox-mcp`), keyed by the NetBox version and
@@ -274,9 +275,9 @@ The honest source is [`docs/compatibility.md`](docs/compatibility.md). In short:
   shapes differ across NetBox versions; please include yours in any bug report. The
   compatibility doc explains how to run the suite against your own instance with a
   read-only token, and what to send back.
-- **stdio by default; Streamable HTTP is loopback-only.** `NETBOX_TRANSPORT=http` serves
-  local clients at `/mcp`; public HTTP remains deferred until a TLS-terminating proxy/TLS
-  milestone, so remote HTTP-only connectors remain unsupported.
+- **stdio by default; HTTP is operator-managed.** `NETBOX_TRANSPORT=http` requires an
+  explicit published-host policy and must be protected by TLS, OIDC, and firewall or network
+  policy before a port is exposed; remote connectors are otherwise unsupported.
 - One plugin has been verified. Others have never been tried.
 - Known limitations — round-trip cost, the `device_id` argument name, no file uploads, no
   GraphQL — are listed there rather than duplicated here.
@@ -290,10 +291,11 @@ operator-only Compose `deployment` profile. It builds a non-root, read-only
 container and takes the NetBox credential solely from a mounted
 `NETBOX_TOKEN_FILE` secret; `compose.yaml` contains no token value.
 
-Its HTTP port is deliberately **not published**. The profile binds HTTP to
-container loopback only so its `/healthz` and `/readyz` probes can run. Public HTTP remains
-unavailable. Do not add a port mapping, reverse proxy, or tunnel:
-remote HTTP-only clients are unsupported. Stdio remains the normal deployment.
+Its HTTP port is deliberately **not published**. If an operator adds a port mapping or
+proxy in a deployment-specific overlay, they must set the matching
+`NETBOX_HTTP_ALLOWED_HOSTS` values and protect the endpoint with TLS, OIDC, and firewall or
+network policy. Host validation is DNS-rebinding protection, not access control. Stdio
+remains the normal deployment.
 The disposable E2E NetBox fixture stays separate in `docker-compose.e2e.yml`.
 
 ---

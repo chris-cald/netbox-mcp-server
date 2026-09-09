@@ -29,6 +29,8 @@ services:
       NETBOX_URL: ${NETBOX_URL:?NETBOX_URL is required}
       NETBOX_TOKEN_FILE: /run/secrets/netbox_token
       NETBOX_TRANSPORT: http
+      # Override when publishing through a proxy or host port mapping.
+      NETBOX_HTTP_ALLOWED_HOSTS: ${NETBOX_HTTP_ALLOWED_HOSTS:-localhost}
     secrets:
       - source: netbox_token
         target: netbox_token

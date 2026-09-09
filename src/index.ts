@@ -41,6 +41,7 @@ const HELP = [
   "                      This exposes the token to anyone able to intercept the",
   "                      connection. Prefer installing your internal root CA.",
   "  NETBOX_TRANSPORT    stdio (default) or http.",
+  "  NETBOX_HTTP_ALLOWED_HOSTS Required for HTTP: comma-separated published Host values.",
   "  NETBOX_OIDC_ISSUER  Optional canonical HTTPS issuer for HTTP Bearer authentication.",
   "  NETBOX_OIDC_JWKS_URL Optional canonical HTTPS JWKS URL for HTTP Bearer authentication.",
   "  NETBOX_OIDC_AUDIENCE Optional exact access-token audience for HTTP Bearer authentication.",
@@ -54,9 +55,9 @@ const HELP = [
   "permissions, if the assistant should not be able to change anything. That",
   "is enforced by NetBox, where no tool argument can reach it.",
   "",
-  "Transport: stdio by default, or Streamable HTTP on port 3000 at /mcp when NETBOX_TRANSPORT=http.",
-  "Your runtime controls port exposure. Use TLS, authentication, and network policy for any",
-  "network-reachable deployment; /healthz and /readyz remain minimal probes.",
+  "Transport: stdio by default, or Streamable HTTP on container port 3000 at /mcp when NETBOX_TRANSPORT=http.",
+  "Your runtime controls port exposure. NETBOX_HTTP_ALLOWED_HOSTS is DNS-rebinding protection, not authentication.",
+  "Use TLS, OIDC, and network policy for every network-reachable deployment; /healthz and /readyz remain minimal probes.",
 ].join("\n");
 
 async function validateNetBoxConfig(): Promise<void> {

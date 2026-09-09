@@ -1,11 +1,11 @@
 # Container deployment
 
-The container image is for an operator-controlled MCP host. It does **not** make
-this server a public HTTP service: public HTTP remains unavailable. The Compose
-`deployment` profile binds Streamable HTTP to `127.0.0.1` inside the container
-and deliberately declares no `ports:`. Do not add a port mapping, reverse proxy,
-tunnel, or public/wildcard bind as a workaround; remote HTTP-only clients remain
-unsupported until the TLS-terminating proxy/TLS milestone.
+The container image is for an operator-controlled MCP host. The Compose
+`deployment` profile deliberately declares no `ports:`. If an operator adds a port
+mapping or reverse proxy in an overlay, they must set `NETBOX_HTTP_ALLOWED_HOSTS`
+to the published `Host` values and protect the endpoint with TLS, OIDC, and a
+firewall or network policy. Allowed hosts provide DNS-rebinding protection; they
+are not authentication, because a direct client can forge `Host`.
 
 `docker-compose.e2e.yml` is a separate, disposable NetBox fixture for explicit
 E2E testing. It is not a deployment template and must not be combined with this
@@ -33,6 +33,10 @@ The Compose file requires only two operator-supplied values:
 - `NETBOX_TOKEN_FILE`: an **absolute host path** to a file containing only the
   NetBox API token. Compose mounts it as the `netbox_token` secret and supplies
   `NETBOX_TOKEN_FILE=/run/secrets/netbox_token` to the process.
+
+For a published overlay, also set `NETBOX_HTTP_ALLOWED_HOSTS` to the comma-separated
+external `Host` values, including the published port when non-default (for example,
+`10.10.0.139:8765`).
 
 Never put `NETBOX_TOKEN`, a token literal, or an `env_file` containing a token
 in `compose.yaml`, an image layer, a shell profile, or a committed `.env` file.
@@ -79,4 +83,4 @@ token can complete an API request, because startup intentionally remains lazy.
 
 There is no host port to browse and no supported remote endpoint. Keep normal
 MCP use on stdio. Running the image directly also preserves the image's stdio
-default; the Compose profile is the explicit, loopback-only HTTP exception.
+default; the Compose profile is the explicit container-HTTP exception.

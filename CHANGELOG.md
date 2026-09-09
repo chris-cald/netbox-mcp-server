@@ -18,18 +18,23 @@ surface may change in a minor release, with the change noted here.
   read-only, drops Linux capabilities, and checks loopback `/healthz` and
   `/readyz`; it deliberately publishes no port. CI builds and starts that
   profile with an ephemeral file-backed dummy secret, while the disposable
-  NetBox E2E fixture remains separate. Public HTTP remains unavailable.
+  NetBox E2E fixture remains separate. It publishes no port by default.
 
-- **Loopback-only Streamable HTTP MCP transport with optional OIDC.** Set
-  `NETBOX_TRANSPORT=http` to serve MCP at `/mcp` and unauthenticated `/healthz`
-  and `/readyz` probes on `127.0.0.1` (or `::1`). Public and wildcard HTTP binds
-  are rejected until a TLS-terminating proxy/TLS milestone. Optional canonical HTTPS
-  issuer/JWKS settings and exact audience authenticate local callers; every MCP
-  request requires an expiring RS256/ES256 Bearer token and binds sessions to its
-  issuer and subject. Gateway credentials are not forwarded to NetBox, which
-  continues to use only its configured API token.
+- **Streamable HTTP MCP transport with optional OIDC.** Set
+  `NETBOX_TRANSPORT=http` with `NETBOX_HTTP_ALLOWED_HOSTS` to serve MCP at `/mcp`
+  and unauthenticated `/healthz` and `/readyz` probes on container port 3000.
+  Optional canonical HTTPS issuer/JWKS settings and exact audience authenticate
+  callers; every MCP request requires an expiring RS256/ES256 Bearer token and
+  binds sessions to its issuer and subject. Gateway credentials are not forwarded
+  to NetBox, which continues to use only its configured API token.
 
 ### Fixed
+
+- **HTTP Host-header bypass in container deployments.** HTTP now requires
+  `NETBOX_HTTP_ALLOWED_HOSTS`, an explicit comma-separated published-host policy.
+  The listener still uses the conventional container port and Compose controls
+  port mappings; the policy is DNS-rebinding protection, not authentication.
+  Network-reachable deployments require TLS, OIDC, and firewall or network policy.
 
 - **The release workflow never shipped the skill.** `docs/installing-the-skill.md`
   said the artifacts were attached to each GitHub release. They were not:

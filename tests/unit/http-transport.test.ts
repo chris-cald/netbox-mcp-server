@@ -58,6 +58,7 @@ async function startHttpServer(
     transport: "http",
     host: "127.0.0.1",
     port: 0,
+    allowedHosts: ["127.0.0.1"],
   },
 ) {
   const server = createStreamableHttpServer(config, createMcpServer);
@@ -88,28 +89,41 @@ describe("HTTP transport configuration", () => {
     expect(loadTransportConfig({})).toEqual({ transport: "stdio" });
   });
 
-  it("uses the conventional container port and wildcard listener", () => {
-    expect(loadTransportConfig({ NETBOX_TRANSPORT: "http" })).toEqual({
-      transport: "http",
-      host: "0.0.0.0",
-      port: 3000,
-    });
-  });
-
-  it("lets the container runtime control network exposure", () => {
-    expect(() => loadTransportConfig({ NETBOX_TRANSPORT: "sse" })).toThrow(
-      /NETBOX_TRANSPORT/,
+  it("requires a published Host allowlist for the wildcard listener", () => {
+    expect(() => loadTransportConfig({ NETBOX_TRANSPORT: "http" })).toThrow(
+      /NETBOX_HTTP_ALLOWED_HOSTS/,
     );
     expect(
       loadTransportConfig({
         NETBOX_TRANSPORT: "http",
+        NETBOX_HTTP_ALLOWED_HOSTS: "10.10.0.139:8765",
         NETBOX_HTTP_HOST: "192.0.2.1",
         NETBOX_HTTP_PORT: "65536",
       }),
-    ).toEqual({ transport: "http", host: "0.0.0.0", port: 3000 });
+    ).toEqual({
+      transport: "http",
+      host: "0.0.0.0",
+      port: 3000,
+      allowedHosts: ["10.10.0.139:8765"],
+    });
+    expect(
+      loadTransportConfig({
+        NETBOX_TRANSPORT: "http",
+        NETBOX_HTTP_ALLOWED_HOSTS: "mcp.example.test:80",
+      }),
+    ).toMatchObject({ allowedHosts: ["mcp.example.test:80"] });
     expect(() =>
-      createStreamableHttpServer({ transport: "http", host: "0.0.0.0", port: 0 }),
-    ).not.toThrow();
+      loadTransportConfig({
+        NETBOX_TRANSPORT: "http",
+        NETBOX_HTTP_ALLOWED_HOSTS: "attacker.invalid/path",
+      }),
+    ).toThrow(/NETBOX_HTTP_ALLOWED_HOSTS/);
+  });
+
+  it("keeps listener host and port under container runtime control", () => {
+    expect(() => loadTransportConfig({ NETBOX_TRANSPORT: "sse" })).toThrow(
+      /NETBOX_TRANSPORT/,
+    );
   });
 
   it("sets conservative Node request timeouts", () => {
@@ -179,6 +193,37 @@ describe("Streamable HTTP transport", () => {
         error: { code: -32000, message: "Method not allowed." },
         id: null,
       });
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("accepts the configured published Host but rejects a forged container Host", async () => {
+    const { server, baseUrl } = await startHttpServer(() => buildServer(), {
+      transport: "http",
+      host: "0.0.0.0",
+      port: 0,
+      allowedHosts: ["10.10.0.139:8765"],
+    });
+    try {
+      await expect(postWithHost(`${baseUrl}/mcp`, "10.10.0.139:8765")).resolves.toBe(200);
+      await expect(postWithHost(`${baseUrl}/mcp`, "0.0.0.0:3000")).resolves.toBe(403);
+    } finally {
+      await server.close();
+    }
+  });
+
+  it("accepts an explicit default-port Host policy", async () => {
+    const { server, baseUrl } = await startHttpServer(() => buildServer(), {
+      transport: "http",
+      host: "0.0.0.0",
+      port: 0,
+      allowedHosts: ["mcp.example.test:80"],
+    });
+    try {
+      await expect(postWithHost(`${baseUrl}/mcp`, "mcp.example.test:80")).resolves.toBe(
+        200,
+      );
     } finally {
       await server.close();
     }
@@ -316,6 +361,7 @@ describe("Streamable HTTP transport", () => {
         transport: "http",
         host: "127.0.0.1",
         port: 0,
+        allowedHosts: ["127.0.0.1"],
         oidc: {
           issuer: "https://issuer.example.test",
           jwksUrl: "https://issuer.example.test/jwks",
@@ -369,6 +415,7 @@ describe("Streamable HTTP transport", () => {
       transport: "http",
       host: "127.0.0.1",
       port: 0,
+      allowedHosts: ["127.0.0.1"],
       oidc: {
         issuer: "https://issuer.example.test",
         jwksUrl: "https://issuer.example.test/unavailable-jwks",
@@ -431,6 +478,7 @@ describe("Streamable HTTP transport", () => {
       transport: "http",
       host: "127.0.0.1",
       port: 0,
+      allowedHosts: ["127.0.0.1"],
       oidc: {
         issuer: "https://issuer.example.test",
         jwksUrl: "https://issuer.example.test/jwks",
