@@ -92,6 +92,40 @@ container's loopback interface. A healthy service means the process is alive and
 its HTTP listener has become ready; it does not validate that the NetBox URL or
 token can complete an API request, because startup intentionally remains lazy.
 
-There is no host port to browse and no supported remote endpoint. Keep normal
-MCP use on stdio. Running the image directly also preserves the image's stdio
-default; the Compose profile is the explicit container-HTTP exception.
+There is no host port to browse in the default profile. Keep normal MCP use on
+stdio. Running the image directly also preserves the image's stdio default; the
+Compose profile is the explicit container-HTTP exception.
+
+## Authentik and NPM exposure
+
+Do not publish a port until the gateway is running with OIDC and a firewall rule
+limits its published port to NPM. Host validation is DNS-rebinding protection,
+not access control.
+
+1. In Authentik, create an OAuth2/OIDC provider and application for this MCP
+   resource. Configure an access-token audience and scope (for example,
+   `netbox-mcp` and `mcp`), then obtain these **non-secret** values from its
+   discovery document or provider settings: issuer, JWKS URL, audience, and
+   required scope. Do not put a client secret, access token, or private key in
+   Compose, NPM, or this repository.
+2. Choose the final HTTPS URL, for example `https://mcp.example.com/mcp`. Set
+   `NETBOX_OIDC_RESOURCE_URL` to that exact URL. Add `mcp.example.com` to
+   `NETBOX_HTTP_ALLOWED_HOSTS` (no `:443` for default HTTPS) alongside any
+   retained private host values. The resource URL and forwarded `Host` must
+   agree exactly.
+3. Configure NPM only after the authenticated gateway is healthy: proxy the
+   public hostname to `http://home.calan.lan:8765`, preserve the public `Host`
+   header, enable its TLS certificate and force HTTPS. Do not make NPM’s access
+   list the authentication boundary; the gateway validates Authentik JWTs.
+4. Restrict `home.calan.lan:8765` at the host firewall to NPM’s source address.
+   Do not forward it to the Internet or configure a tunnel. Keep `/healthz` and
+   `/readyz` private as well.
+5. Verify before enabling a connector: the protected-resource metadata endpoint
+   returns its exact resource URL and Authentik issuer; an MCP request without a
+   token returns `401` with `resource_metadata`; a valid scoped token succeeds;
+   expired, wrong-audience, and missing-scope tokens fail; and the NetBox API
+   sees only its configured server token, never the caller Bearer token.
+
+The resource metadata endpoint is
+`/.well-known/oauth-protected-resource/mcp`. It lets OAuth-aware clients discover
+the Authentik authorization server from the `401` Bearer challenge.
