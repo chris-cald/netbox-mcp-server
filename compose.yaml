@@ -1,8 +1,9 @@
 # Intentionally separate from docker-compose.e2e.yml. This profile builds the
 # application image; the E2E fixture remains disposable and opt-in.
 #
-# This is not a public HTTP deployment. The server binds to its own loopback
-# interface and this file deliberately has no `ports` section. See
+# This profile deliberately has no host `ports` section. The server listens on
+# its conventional container port; any publishing is an operator overlay that
+# must provide mandatory OIDC and allowed-host configuration. See
 # docs/container-deployment.md before using it.
 services:
   netbox-mcp:
@@ -31,6 +32,11 @@ services:
       NETBOX_TRANSPORT: http
       # Override when publishing through a proxy or host port mapping.
       NETBOX_HTTP_ALLOWED_HOSTS: ${NETBOX_HTTP_ALLOWED_HOSTS:-localhost}
+      NETBOX_OIDC_ISSUER: ${NETBOX_OIDC_ISSUER:?NETBOX_OIDC_ISSUER is required for HTTP}
+      NETBOX_OIDC_JWKS_URL: ${NETBOX_OIDC_JWKS_URL:?NETBOX_OIDC_JWKS_URL is required for HTTP}
+      NETBOX_OIDC_AUDIENCE: ${NETBOX_OIDC_AUDIENCE:?NETBOX_OIDC_AUDIENCE is required for HTTP}
+      NETBOX_OIDC_REQUIRED_SCOPE: ${NETBOX_OIDC_REQUIRED_SCOPE:?NETBOX_OIDC_REQUIRED_SCOPE is required for HTTP}
+      NETBOX_OIDC_RESOURCE_URL: ${NETBOX_OIDC_RESOURCE_URL:?NETBOX_OIDC_RESOURCE_URL is required for HTTP}
     secrets:
       - source: netbox_token
         target: netbox_token

@@ -77,10 +77,11 @@ Deleting the cache directory is safe: the next call re-fetches.
 | Grok connectors    | **Not supported** | Same reason.                                                |
 
 `NETBOX_TRANSPORT=http` provides Streamable HTTP at `/mcp` on container port 3000. It
-requires `NETBOX_HTTP_ALLOWED_HOSTS` for DNS-rebinding protection; that policy is not
-authentication. Optional OIDC validates a Bearer access token on every MCP request. Any
-published deployment must also use TLS and firewall or network policy; this is not a
-hosted connector service.
+requires `NETBOX_HTTP_ALLOWED_HOSTS` for DNS-rebinding protection and all five OIDC inputs
+(issuer, JWKS URL, audience, required scope, and public HTTPS resource URL) for mandatory
+Bearer authentication. It advertises RFC 9728 protected-resource metadata and a 401
+resource-metadata challenge. Any published deployment must also use TLS and firewall or
+network policy; this is not a hosted connector service.
 
 ## NetBox
 

@@ -24,6 +24,15 @@ describe("production container deployment", () => {
     expect(compose).not.toContain("NETBOX_HTTP_HOST");
     expect(compose).not.toContain("NETBOX_HTTP_PORT");
     expect(compose).toContain("NETBOX_HTTP_ALLOWED_HOSTS");
+    for (const name of [
+      "NETBOX_OIDC_ISSUER",
+      "NETBOX_OIDC_JWKS_URL",
+      "NETBOX_OIDC_AUDIENCE",
+      "NETBOX_OIDC_REQUIRED_SCOPE",
+      "NETBOX_OIDC_RESOURCE_URL",
+    ]) {
+      expect(compose).toContain(name);
+    }
     expect(compose).toContain("NETBOX_TOKEN_FILE: /run/secrets/netbox_token");
     expect(compose).toMatch(/secrets:\s*\n\s+netbox_token:/);
     expect(compose).not.toMatch(/^\s*ports:/m);

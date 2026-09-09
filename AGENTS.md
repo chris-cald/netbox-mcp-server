@@ -52,7 +52,7 @@ Facts you may need:
 | Normal install      | `npx -y @zenixsolutions/netbox-mcp` — no clone, no build                |
 | Transport           | stdio (default), or Streamable HTTP at `/mcp`                           |
 | Credential env vars | `NETBOX_URL`, plus exactly one of `NETBOX_TOKEN` or `NETBOX_TOKEN_FILE` |
-| Optional env vars   | `NETBOX_INSECURE`; HTTP allowed-host policy and optional OIDC settings  |
+| Optional env vars   | `NETBOX_INSECURE`; HTTP allowed-host policy; mandatory OIDC for HTTP    |
 | Tools registered    | **6**, always — see below                                               |
 
 ### The six tools
@@ -415,10 +415,11 @@ Optional environment variables:
                       connection. Prefer installing your internal root CA.
   NETBOX_TRANSPORT    stdio (default) or http.
   NETBOX_HTTP_ALLOWED_HOSTS Required for HTTP: comma-separated published Host values.
-  NETBOX_OIDC_ISSUER  Optional canonical HTTPS issuer for HTTP Bearer authentication.
-  NETBOX_OIDC_JWKS_URL Optional canonical HTTPS JWKS URL for HTTP Bearer authentication.
-  NETBOX_OIDC_AUDIENCE Optional exact access-token audience for HTTP Bearer authentication.
-  NETBOX_OIDC_REQUIRED_SCOPE Optional required access-token scope.
+  NETBOX_OIDC_ISSUER  Required for HTTP: canonical HTTPS issuer.
+  NETBOX_OIDC_JWKS_URL Required for HTTP: canonical HTTPS JWKS URL.
+  NETBOX_OIDC_AUDIENCE Required for HTTP: exact access-token audience.
+  NETBOX_OIDC_REQUIRED_SCOPE Required for HTTP: exact access-token scope.
+  NETBOX_OIDC_RESOURCE_URL Required for HTTP: canonical HTTPS /mcp resource URL.
 
 NETBOX_TOKEN_FILE is read before every NetBox request so token rotation takes
 effect without restart. File paths and token values are never reported.
@@ -965,18 +966,19 @@ apart from those config paths; the commands in sections 4, 5, 7 and 8 are identi
 
 This is the complete list. `--help` (section 5.1) is the authoritative source.
 
-| Variable                     | Required    | Default | Meaning                                                                                                                     |
-| ---------------------------- | ----------- | ------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `NETBOX_URL`                 | **yes**     | —       | Base URL, no `/api` suffix. A trailing `/` or `/api` is stripped automatically. Must parse as a URL, or `--check` exits 78. |
-| `NETBOX_TOKEN`               | one of      | —       | Inline NetBox API token. Its permissions are the only thing that limits what the assistant can do.                          |
-| `NETBOX_TOKEN_FILE`          | one of      | —       | A readable regular file containing the token. It is mutually exclusive with `NETBOX_TOKEN` and read before every request.   |
-| `NETBOX_INSECURE`            | no          | off     | Disables TLS certificate verification for every call to NetBox, including the token-bearing ones. See the warning below.    |
-| `NETBOX_TRANSPORT`           | no          | `stdio` | `stdio` (default) or `http`.                                                                                                |
-| `NETBOX_HTTP_ALLOWED_HOSTS`  | http        | —       | Comma-separated published Host values for DNS-rebinding protection; not authentication.                                     |
-| `NETBOX_OIDC_ISSUER`         | no          | —       | Canonical HTTPS issuer for optional HTTP Bearer authentication.                                                             |
-| `NETBOX_OIDC_JWKS_URL`       | with issuer | —       | Canonical HTTPS JWKS URL for optional HTTP Bearer authentication.                                                           |
-| `NETBOX_OIDC_AUDIENCE`       | with issuer | —       | Exact nonempty audience for optional HTTP Bearer authentication.                                                            |
-| `NETBOX_OIDC_REQUIRED_SCOPE` | no          | —       | Optional exact access-token scope.                                                                                          |
+| Variable                     | Required | Default | Meaning                                                                                                                     |
+| ---------------------------- | -------- | ------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `NETBOX_URL`                 | **yes**  | —       | Base URL, no `/api` suffix. A trailing `/` or `/api` is stripped automatically. Must parse as a URL, or `--check` exits 78. |
+| `NETBOX_TOKEN`               | one of   | —       | Inline NetBox API token. Its permissions are the only thing that limits what the assistant can do.                          |
+| `NETBOX_TOKEN_FILE`          | one of   | —       | A readable regular file containing the token. It is mutually exclusive with `NETBOX_TOKEN` and read before every request.   |
+| `NETBOX_INSECURE`            | no       | off     | Disables TLS certificate verification for every call to NetBox, including the token-bearing ones. See the warning below.    |
+| `NETBOX_TRANSPORT`           | no       | `stdio` | `stdio` (default) or `http`.                                                                                                |
+| `NETBOX_HTTP_ALLOWED_HOSTS`  | http     | —       | Comma-separated published Host values for DNS-rebinding protection; not authentication.                                     |
+| `NETBOX_OIDC_ISSUER`         | http     | —       | Canonical HTTPS issuer for mandatory HTTP Bearer authentication.                                                            |
+| `NETBOX_OIDC_JWKS_URL`       | http     | —       | Canonical HTTPS JWKS URL for mandatory HTTP Bearer authentication.                                                          |
+| `NETBOX_OIDC_AUDIENCE`       | http     | —       | Exact nonempty audience for mandatory HTTP Bearer authentication.                                                           |
+| `NETBOX_OIDC_REQUIRED_SCOPE` | http     | —       | Exact required access-token scope.                                                                                          |
+| `NETBOX_OIDC_RESOURCE_URL`   | http     | —       | Canonical public HTTPS `/mcp` URL for RFC 9728 metadata and Bearer challenges.                                              |
 
 Boolean variables are true for `1`, `true`, `yes`, `y`, or `on` (case-insensitive, after
 trimming whitespace). Every other value, including an empty string, is false.
@@ -985,9 +987,10 @@ trimming whitespace). Every other value, including an empty string, is false.
 
 With `NETBOX_TRANSPORT=http`, MCP is served at `/mcp` on container port 3000; unauthenticated
 minimal probes are available at `/healthz` and `/readyz`. `NETBOX_HTTP_ALLOWED_HOSTS` is
-required for DNS-rebinding protection, but direct callers can forge Host. Optional OIDC
-authenticates MCP callers; published deployments also require TLS and firewall or network
-policy. Caller headers are never NetBox credentials.
+required for DNS-rebinding protection, but direct callers can forge Host. OIDC issuer, JWKS,
+audience, scope, and resource URL are mandatory; metadata is served at
+`/.well-known/oauth-protected-resource/mcp`. Published deployments also require TLS and
+firewall or network policy. Caller headers are never NetBox credentials.
 
 ⚠️ **`NETBOX_INSECURE=1` turns off certificate verification entirely.** Anyone able to
 intercept the connection can present their own certificate and read the API token. Use it

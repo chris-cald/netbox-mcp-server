@@ -63,8 +63,8 @@ export function loadTransportConfig(
   const host = DEFAULT_HTTP_HOST;
   const port = DEFAULT_HTTP_PORT;
   const allowedHosts = loadAllowedHosts(env);
-  const oidc = loadOidcConfig(env, false);
-  return { transport: "http", host, port, allowedHosts, ...(oidc ? { oidc } : {}) };
+  const oidc = loadOidcConfig(env, true);
+  return { transport: "http", host, port, allowedHosts, oidc };
 }
 
 function loadAllowedHosts(env: NodeJS.ProcessEnv): string[] {
@@ -169,6 +169,7 @@ export function createStreamableHttpServer(
   if (config.oidc) assertOidcConfig(config.oidc);
 
   const authenticator = config.oidc ? createOidcAuthenticator(config.oidc) : undefined;
+  const metadata = config.oidc ? protectedResourceMetadata(config.oidc) : undefined;
   const sessions = new Map<string, Session>();
   const activeSessions = new Set<Session>();
   let ready = false;
@@ -230,12 +231,21 @@ export function createStreamableHttpServer(
       writeJson(response, ready ? 200 : 503, { status: ready ? "ready" : "not_ready" });
       return;
     }
+    if (metadata && path === metadata.path && request.method === "GET") {
+      if (!validateHostHeader(request, response)) return;
+      writeJson(response, 200, {
+        resource: config.oidc?.resourceUrl,
+        authorization_servers: [config.oidc?.issuer],
+      });
+      return;
+    }
     if (path !== "/mcp") {
       writeJson(response, 404, { error: "not_found" });
       return;
     }
 
     if (!validateHostHeader(request, response)) return;
+    if (!validateOriginHeader(request, response)) return;
 
     if (
       request.method !== "POST" &&
@@ -248,7 +258,12 @@ export function createStreamableHttpServer(
       return;
     }
 
-    const principal = await authenticateRequest(request, response, authenticator);
+    const principal = await authenticateRequest(
+      request,
+      response,
+      authenticator,
+      config.oidc,
+    );
     if (principal === undefined && authenticator) return;
     await cleanupExpiredSessions();
 
@@ -276,7 +291,7 @@ export function createStreamableHttpServer(
       if (existing) {
         if (!samePrincipal(existing.principal, principal)) {
           request.resume();
-          writeAuthenticationError(response, 401);
+          writeAuthenticationError(response, 401, config.oidc);
           return;
         }
         existing.lastActivityAt = Date.now();
@@ -320,7 +335,7 @@ export function createStreamableHttpServer(
     }
     if (!samePrincipal(session.principal, principal)) {
       request.resume();
-      writeAuthenticationError(response, 401);
+      writeAuthenticationError(response, 401, config.oidc);
       return;
     }
     session.lastActivityAt = Date.now();
@@ -335,6 +350,19 @@ export function createStreamableHttpServer(
     if (host && matchesAllowedHost(host, config.allowedHosts)) return true;
     request.resume();
     writeJsonRpcError(response, 403, -32000, `Invalid Host header: ${host}`);
+    return false;
+  }
+
+  function validateOriginHeader(
+    request: IncomingMessage,
+    response: ServerResponse,
+  ): boolean {
+    const origin = request.headers.origin;
+    const resourceOrigin =
+      config.oidc?.resourceUrl && new URL(config.oidc.resourceUrl).origin;
+    if (!origin || !resourceOrigin || origin === resourceOrigin) return true;
+    request.resume();
+    writeJsonRpcError(response, 403, -32000, "Invalid Origin header");
     return false;
   }
 
@@ -448,6 +476,7 @@ async function authenticateRequest(
   request: IncomingMessage,
   response: ServerResponse,
   authenticator: OidcAuthenticator | undefined,
+  oidc: OidcConfig | undefined,
 ): Promise<OidcPrincipal | undefined> {
   if (!authenticator) return undefined;
   try {
@@ -457,6 +486,7 @@ async function authenticateRequest(
     writeAuthenticationError(
       response,
       error instanceof OidcAuthenticationError ? error.status : 503,
+      oidc,
     );
     return undefined;
   }
@@ -475,6 +505,7 @@ function samePrincipal(
 function writeAuthenticationError(
   response: ServerResponse,
   status: 401 | 403 | 503,
+  oidc?: OidcConfig,
 ): void {
   const message =
     status === 403
@@ -487,8 +518,25 @@ function writeAuthenticationError(
     status,
     -32000,
     message,
-    status === 401 ? { "www-authenticate": "Bearer" } : undefined,
+    status === 401
+      ? { "www-authenticate": bearerChallenge(oidc) }
+      : status === 403
+        ? {
+            "www-authenticate": `Bearer error="insufficient_scope", scope="${oidc?.requiredScope ?? ""}"`,
+          }
+        : undefined,
   );
+}
+
+function protectedResourceMetadata(oidc: OidcConfig): { path: string; url: string } {
+  const resource = new URL(oidc.resourceUrl ?? "");
+  resource.pathname = `/.well-known/oauth-protected-resource${resource.pathname}`;
+  return { path: resource.pathname, url: resource.href };
+}
+
+function bearerChallenge(oidc: OidcConfig | undefined): string {
+  if (!oidc?.resourceUrl) return "Bearer";
+  return `Bearer resource_metadata="${protectedResourceMetadata(oidc).url}"`;
 }
 
 class RequestTooLargeError extends Error {}

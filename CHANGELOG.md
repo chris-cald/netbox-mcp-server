@@ -20,12 +20,12 @@ surface may change in a minor release, with the change noted here.
   profile with an ephemeral file-backed dummy secret, while the disposable
   NetBox E2E fixture remains separate. It publishes no port by default.
 
-- **Streamable HTTP MCP transport with optional OIDC.** Set
-  `NETBOX_TRANSPORT=http` with `NETBOX_HTTP_ALLOWED_HOSTS` to serve MCP at `/mcp`
-  and unauthenticated `/healthz` and `/readyz` probes on container port 3000.
-  Optional canonical HTTPS issuer/JWKS settings and exact audience authenticate
-  callers; every MCP request requires an expiring RS256/ES256 Bearer token and
-  binds sessions to its issuer and subject. Gateway credentials are not forwarded
+- **Authenticated Streamable HTTP MCP transport.** Set `NETBOX_TRANSPORT=http`
+  with `NETBOX_HTTP_ALLOWED_HOSTS` and all five OIDC inputs (issuer, JWKS URL,
+  audience, required scope, and public HTTPS `/mcp` resource URL) to serve MCP.
+  It fails closed without them, verifies expiring RS256/ES256 Bearer tokens, and
+  binds sessions to issuer and subject. It publishes RFC 9728 resource metadata
+  and a 401 resource-metadata challenge. Gateway credentials are not forwarded
   to NetBox, which continues to use only its configured API token.
 
 ### Fixed

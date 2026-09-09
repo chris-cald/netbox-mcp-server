@@ -93,23 +93,46 @@ describe("HTTP transport configuration", () => {
     expect(() => loadTransportConfig({ NETBOX_TRANSPORT: "http" })).toThrow(
       /NETBOX_HTTP_ALLOWED_HOSTS/,
     );
+    expect(() =>
+      loadTransportConfig({
+        NETBOX_TRANSPORT: "http",
+        NETBOX_HTTP_ALLOWED_HOSTS: "10.10.0.139:8765",
+      }),
+    ).toThrow(/NETBOX_OIDC_ISSUER/);
     expect(
       loadTransportConfig({
         NETBOX_TRANSPORT: "http",
         NETBOX_HTTP_ALLOWED_HOSTS: "10.10.0.139:8765",
+        NETBOX_OIDC_ISSUER: "https://issuer.example.test",
+        NETBOX_OIDC_JWKS_URL: "https://issuer.example.test/jwks",
+        NETBOX_OIDC_AUDIENCE: "netbox-mcp",
+        NETBOX_OIDC_REQUIRED_SCOPE: "mcp",
+        NETBOX_OIDC_RESOURCE_URL: "https://mcp.example.test/mcp",
         NETBOX_HTTP_HOST: "192.0.2.1",
         NETBOX_HTTP_PORT: "65536",
       }),
-    ).toEqual({
+    ).toMatchObject({
       transport: "http",
       host: "0.0.0.0",
       port: 3000,
       allowedHosts: ["10.10.0.139:8765"],
+      oidc: {
+        issuer: "https://issuer.example.test",
+        jwksUrl: "https://issuer.example.test/jwks",
+        audience: "netbox-mcp",
+        requiredScope: "mcp",
+        resourceUrl: "https://mcp.example.test/mcp",
+      },
     });
     expect(
       loadTransportConfig({
         NETBOX_TRANSPORT: "http",
         NETBOX_HTTP_ALLOWED_HOSTS: "mcp.example.test:80",
+        NETBOX_OIDC_ISSUER: "https://issuer.example.test",
+        NETBOX_OIDC_JWKS_URL: "https://issuer.example.test/jwks",
+        NETBOX_OIDC_AUDIENCE: "netbox-mcp",
+        NETBOX_OIDC_REQUIRED_SCOPE: "mcp",
+        NETBOX_OIDC_RESOURCE_URL: "https://mcp.example.test/mcp",
       }),
     ).toMatchObject({ allowedHosts: ["mcp.example.test:80"] });
     expect(() =>
@@ -178,6 +201,44 @@ describe("Streamable HTTP transport", () => {
       expect(server.isReady()).toBe(false);
     } finally {
       await client.close();
+      await server.close();
+    }
+  });
+
+  it("publishes protected-resource metadata and challenges missing Bearer tokens", async () => {
+    const { server, baseUrl } = await startHttpServer(() => buildServer(), {
+      transport: "http",
+      host: "127.0.0.1",
+      port: 0,
+      allowedHosts: ["127.0.0.1"],
+      oidc: {
+        issuer: "https://issuer.example.test",
+        jwksUrl: "https://issuer.example.test/jwks",
+        audience: "netbox-mcp",
+        requiredScope: "mcp",
+        resourceUrl: "https://mcp.example.test/mcp",
+      },
+    });
+    try {
+      const metadata = await fetch(`${baseUrl}/.well-known/oauth-protected-resource/mcp`);
+      expect(metadata.status).toBe(200);
+      await expect(metadata.json()).resolves.toEqual({
+        resource: "https://mcp.example.test/mcp",
+        authorization_servers: ["https://issuer.example.test"],
+      });
+
+      const badOrigin = await fetch(`${baseUrl}/mcp`, {
+        method: "POST",
+        headers: { origin: "https://attacker.example.test" },
+      });
+      expect(badOrigin.status).toBe(403);
+
+      const response = await fetch(`${baseUrl}/mcp`, { method: "POST" });
+      expect(response.status).toBe(401);
+      expect(response.headers.get("www-authenticate")).toBe(
+        'Bearer resource_metadata="https://mcp.example.test/.well-known/oauth-protected-resource/mcp"',
+      );
+    } finally {
       await server.close();
     }
   });
@@ -366,6 +427,8 @@ describe("Streamable HTTP transport", () => {
           issuer: "https://issuer.example.test",
           jwksUrl: "https://issuer.example.test/jwks",
           audience: "netbox-mcp",
+          requiredScope: "mcp",
+          resourceUrl: "https://mcp.example.test/mcp",
         },
       },
     );
@@ -420,6 +483,8 @@ describe("Streamable HTTP transport", () => {
         issuer: "https://issuer.example.test",
         jwksUrl: "https://issuer.example.test/unavailable-jwks",
         audience: "netbox-mcp",
+        requiredScope: "mcp",
+        resourceUrl: "https://mcp.example.test/mcp",
       },
     });
     try {
@@ -484,12 +549,15 @@ describe("Streamable HTTP transport", () => {
         jwksUrl: "https://issuer.example.test/jwks",
         audience: "netbox-mcp",
         requiredScope: "mcp",
+        resourceUrl: "https://mcp.example.test/mcp",
       },
     });
     try {
       const missing = await fetch(`${baseUrl}/mcp`, { method: "POST" });
       expect(missing.status).toBe(401);
-      expect(missing.headers.get("www-authenticate")).toBe("Bearer");
+      expect(missing.headers.get("www-authenticate")).toBe(
+        'Bearer resource_metadata="https://mcp.example.test/.well-known/oauth-protected-resource/mcp"',
+      );
 
       const expired = await fetch(`${baseUrl}/mcp`, {
         method: "POST",

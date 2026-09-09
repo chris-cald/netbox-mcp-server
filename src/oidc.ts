@@ -12,6 +12,7 @@ export interface OidcConfig {
   jwksUrl: string;
   audience: string;
   requiredScope?: string | undefined;
+  resourceUrl?: string | undefined;
 }
 
 export interface OidcPrincipal {
@@ -40,13 +41,15 @@ export function loadOidcConfig(
   const jwksUrl = (env.NETBOX_OIDC_JWKS_URL ?? "").trim();
   const audience = (env.NETBOX_OIDC_AUDIENCE ?? "").trim();
   const requiredScope = (env.NETBOX_OIDC_REQUIRED_SCOPE ?? "").trim();
-  const configured = issuer || jwksUrl || audience || requiredScope;
+  const resourceUrl = (env.NETBOX_OIDC_RESOURCE_URL ?? "").trim();
+  const configured = issuer || jwksUrl || audience || requiredScope || resourceUrl;
   if (!required && !configured) return undefined;
   const config = {
     issuer,
     jwksUrl,
     audience,
     ...(requiredScope ? { requiredScope } : {}),
+    ...(resourceUrl ? { resourceUrl } : {}),
   };
   assertOidcConfig(config);
   return config;
@@ -62,8 +65,22 @@ export function assertOidcConfig(config: OidcConfig): void {
   if (!config.audience.trim()) {
     throw new Error("Missing required environment variable NETBOX_OIDC_AUDIENCE.");
   }
+  if (!config.requiredScope?.trim()) {
+    throw new Error("Missing required environment variable NETBOX_OIDC_REQUIRED_SCOPE.");
+  }
+  if (!config.resourceUrl?.trim()) {
+    throw new Error("Missing required environment variable NETBOX_OIDC_RESOURCE_URL.");
+  }
   assertCanonicalHttpsUrl("NETBOX_OIDC_ISSUER", config.issuer);
   assertCanonicalHttpsUrl("NETBOX_OIDC_JWKS_URL", config.jwksUrl);
+  assertCanonicalMcpResourceUrl(config.resourceUrl);
+}
+
+function assertCanonicalMcpResourceUrl(value: string): void {
+  assertCanonicalHttpsUrl("NETBOX_OIDC_RESOURCE_URL", value);
+  if (new URL(value).pathname !== "/mcp") {
+    throw new Error("NETBOX_OIDC_RESOURCE_URL must identify the HTTPS /mcp endpoint.");
+  }
 }
 
 function assertCanonicalHttpsUrl(name: string, value: string): void {

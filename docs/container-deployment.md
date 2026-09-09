@@ -26,17 +26,22 @@ docker compose --profile deployment build
 
 ## Environment and secret file
 
-The Compose file requires only two operator-supplied values:
+The Compose file requires the following operator-supplied values when HTTP is enabled:
 
 - `NETBOX_URL`: the NetBox base URL, without `/api`. It is configuration, not a
   credential.
 - `NETBOX_TOKEN_FILE`: an **absolute host path** to a file containing only the
   NetBox API token. Compose mounts it as the `netbox_token` secret and supplies
   `NETBOX_TOKEN_FILE=/run/secrets/netbox_token` to the process.
+- `NETBOX_HTTP_ALLOWED_HOSTS`: comma-separated external `Host` values, including
+  the published port when non-default.
+- `NETBOX_OIDC_ISSUER`, `NETBOX_OIDC_JWKS_URL`, `NETBOX_OIDC_AUDIENCE`, and
+  `NETBOX_OIDC_REQUIRED_SCOPE`: Authentik token-verification inputs.
+- `NETBOX_OIDC_RESOURCE_URL`: canonical public HTTPS URL ending in `/mcp`.
 
-For a published overlay, also set `NETBOX_HTTP_ALLOWED_HOSTS` to the comma-separated
-external `Host` values, including the published port when non-default (for example,
-`10.10.0.139:8765`).
+HTTP fails closed unless all of these OIDC values are present. It serves RFC 9728
+protected-resource metadata at `/.well-known/oauth-protected-resource/mcp`; do not
+put an Authentik client secret or a token in Compose configuration.
 
 Never put `NETBOX_TOKEN`, a token literal, or an `env_file` containing a token
 in `compose.yaml`, an image layer, a shell profile, or a committed `.env` file.
@@ -60,6 +65,12 @@ the resolved configuration before starting it:
 ```bash
 export NETBOX_URL="https://netbox.example.internal"
 export NETBOX_TOKEN_FILE="/absolute/path/outside/the/repository/netbox-token"
+export NETBOX_HTTP_ALLOWED_HOSTS="mcp.example.internal"
+export NETBOX_OIDC_ISSUER="https://issuer.example.internal/application/o/netbox-mcp/"
+export NETBOX_OIDC_JWKS_URL="https://issuer.example.internal/application/o/netbox-mcp/jwks/"
+export NETBOX_OIDC_AUDIENCE="netbox-mcp"
+export NETBOX_OIDC_REQUIRED_SCOPE="mcp"
+export NETBOX_OIDC_RESOURCE_URL="https://mcp.example.internal/mcp"
 docker compose --profile deployment config
 ```
 

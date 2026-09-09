@@ -93,8 +93,8 @@ jobs:
       - uses: actions/checkout@v7
 
       # Build independently of the disposable NetBox E2E fixture. This proves
-      # the production image and its loopback-only operational profile without
-      # requiring a live NetBox or putting a credential in GitHub Actions.
+      # the production image and its un-published authenticated HTTP profile
+      # without requiring a live NetBox or putting a credential in GitHub Actions.
       - name: Prepare an ephemeral file-backed secret
         run: |
           umask 077
@@ -113,11 +113,16 @@ jobs:
             --tag netbox-mcp:ci .
           test "$(docker image inspect --format '{{ index .Config.Labels "org.opencontainers.image.revision" }}' netbox-mcp:ci)" = "$GITHUB_SHA"
 
-      - name: Validate and start the loopback-only deployment profile
+      - name: Validate and start the authenticated HTTP deployment profile
         env:
           NETBOX_URL: https://netbox.example.test
           NETBOX_TOKEN_FILE: ${{ runner.temp }}/netbox-token
           NETBOX_MCP_IMAGE: netbox-mcp:ci
+          NETBOX_OIDC_ISSUER: https://issuer.example.test
+          NETBOX_OIDC_JWKS_URL: https://issuer.example.test/jwks
+          NETBOX_OIDC_AUDIENCE: netbox-mcp
+          NETBOX_OIDC_REQUIRED_SCOPE: mcp
+          NETBOX_OIDC_RESOURCE_URL: https://mcp.example.test/mcp
         run: |
           docker compose --profile deployment config
           docker compose --profile deployment up -d
@@ -139,6 +144,11 @@ jobs:
           NETBOX_URL: https://netbox.example.test
           NETBOX_TOKEN_FILE: ${{ runner.temp }}/netbox-token
           NETBOX_MCP_IMAGE: netbox-mcp:ci
+          NETBOX_OIDC_ISSUER: https://issuer.example.test
+          NETBOX_OIDC_JWKS_URL: https://issuer.example.test/jwks
+          NETBOX_OIDC_AUDIENCE: netbox-mcp
+          NETBOX_OIDC_REQUIRED_SCOPE: mcp
+          NETBOX_OIDC_RESOURCE_URL: https://mcp.example.test/mcp
         run: docker compose --profile deployment down --volumes --remove-orphans
 
   netbox-e2e:
