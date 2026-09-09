@@ -113,14 +113,23 @@ not access control.
    `NETBOX_HTTP_ALLOWED_HOSTS` (no `:443` for default HTTPS) alongside any
    retained private host values. The resource URL and forwarded `Host` must
    agree exactly.
-3. Configure NPM only after the authenticated gateway is healthy: proxy the
-   public hostname to `http://home.calan.lan:8765`, preserve the public `Host`
-   header, enable its TLS certificate and force HTTPS. Do not make NPM’s access
-   list the authentication boundary; the gateway validates Authentik JWTs.
-4. Restrict `home.calan.lan:8765` at the host firewall to NPM’s source address.
+3. For a virtual path beneath an existing site, use the exact resource URL (for
+   example, `https://netbox.calan.co/mcp`) and add `netbox.calan.co` to the
+   allowed hosts. In NPM, add **two** path routes to
+   `http://home.calan.lan:8765` without rewriting either URI: `/mcp` and
+   `/.well-known/oauth-protected-resource/mcp`. Leave the existing NetBox route
+   as the default route. Preserve `Host: netbox.calan.co`; the gateway rejects a
+   different forwarded host.
+4. Do not place these two MCP paths behind Authentik proxy/cookie authentication
+   or an NPM access-list redirect: OAuth clients need the gateway's JSON `401`
+   Bearer `resource_metadata` challenge. The gateway itself validates Authentik
+   access tokens. Reuse the Authentik instance if desired, but prefer a separate
+   OAuth2/OIDC provider/application (or at least a separate client, audience,
+   and `mcp` scope) rather than broadening NetBox's existing client privileges.
+5. Restrict `home.calan.lan:8765` at the host firewall to NPM’s source address.
    Do not forward it to the Internet or configure a tunnel. Keep `/healthz` and
    `/readyz` private as well.
-5. Verify before enabling a connector: the protected-resource metadata endpoint
+6. Verify before enabling a connector: the protected-resource metadata endpoint
    returns its exact resource URL and Authentik issuer; an MCP request without a
    token returns `401` with `resource_metadata`; a valid scoped token succeeds;
    expired, wrong-audience, and missing-scope tokens fail; and the NetBox API
