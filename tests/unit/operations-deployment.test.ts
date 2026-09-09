@@ -62,8 +62,8 @@ describe("production container deployment", () => {
     for (const detail of [
       "separate Application and OAuth2/OIDC Provider",
       "Authorization Code with PKCE/S256",
-      "NETBOX_OIDC_RESOURCE_URL=https://netbox.calan.co/mcp",
-      "NETBOX_HTTP_ALLOWED_HOSTS=home:8765,home.calan.lan:8765,netbox.calan.co",
+      "NETBOX_OIDC_RESOURCE_URL=https://<PUBLIC_MCP_HOST>/mcp",
+      "NETBOX_HTTP_ALLOWED_HOSTS=<PRIVATE_HOST>:<PRIVATE_PORT>,<PUBLIC_MCP_HOST>",
       "/.well-known/oauth-protected-resource/mcp",
       "proxy_set_header Authorization $http_authorization",
       "Do **not** add `proxy_pass`",

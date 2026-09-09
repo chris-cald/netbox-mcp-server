@@ -148,16 +148,21 @@ https://AUTHENTIK_HOST/application/o/netbox-mcp/.well-known/openid-configuration
 
 Copy the document's `issuer` and `jwks_uri` values; they are public, non-secret
 URLs. The authorization and token endpoints remain Authentik client settings and
-are not gateway environment variables. For a virtual MCP path under NetBox, use:
+are not gateway environment variables. For a virtual MCP path, substitute your
+own values in this template:
 
 ```text
-NETBOX_HTTP_ALLOWED_HOSTS=home:8765,home.calan.lan:8765,netbox.calan.co
+NETBOX_HTTP_ALLOWED_HOSTS=<PRIVATE_HOST>:<PRIVATE_PORT>,<PUBLIC_MCP_HOST>
 NETBOX_OIDC_ISSUER=<discovery issuer>
 NETBOX_OIDC_JWKS_URL=<discovery jwks_uri>
-NETBOX_OIDC_AUDIENCE=netbox-mcp
-NETBOX_OIDC_REQUIRED_SCOPE=mcp
-NETBOX_OIDC_RESOURCE_URL=https://netbox.calan.co/mcp
+NETBOX_OIDC_AUDIENCE=<MCP-only audience>
+NETBOX_OIDC_REQUIRED_SCOPE=<MCP-only scope>
+NETBOX_OIDC_RESOURCE_URL=https://<PUBLIC_MCP_HOST>/mcp
 ```
+
+For the planned `netbox.calan.co` virtual path, the public host/resource entries
+are `netbox.calan.co` and `https://netbox.calan.co/mcp`; keep private host and
+port values specific to the actual gateway deployment.
 
 Before deployment, verify a locally decoded test access token has an exact `iss`,
 `aud`, `scope` containing `mcp`, numeric `exp`, and nonempty `sub` matching those
@@ -167,12 +172,16 @@ private signing key in Compose, NPM, or this repository.
 
 ### NPM virtual-path configuration
 
-Keep the existing `netbox.calan.co` Proxy Host and its NetBox default route. Do
-not replace its forward host with the MCP gateway.
+Keep the existing `<PUBLIC_MCP_HOST>` Proxy Host and its NetBox default route.
+Do not replace its forward host with the MCP gateway. For the planned virtual
+path, `<PUBLIC_MCP_HOST>` is `netbox.calan.co`.
 
-In that Proxy Host's **Custom Locations**, add both routes below. For each, set
-**Forward Scheme** `http`, **Forward Hostname/IP** `home.calan.lan`, and **Forward
-Port** `8765`:
+In that Proxy Host's **Custom Locations**, add both routes below. Set **Forward
+Hostname/IP** and **Forward Port** to the private gateway values. Use **Forward
+Scheme** `http` only when NPM and the gateway are co-hosted or connected by an
+isolated trusted link. Otherwise, do not forward Bearer tokens over plaintext
+LAN HTTP: co-host NPM with the gateway or use an encrypted network/TLS tunnel
+between them.
 
 | Location                                    | Purpose                               |
 | ------------------------------------------- | ------------------------------------- |
@@ -202,20 +211,28 @@ silently accepting redirects.
 
 ### Network restriction and verification
 
-Restrict `home.calan.lan:8765` at the host firewall to NPM's source address only.
-Do not forward it to the Internet or configure a tunnel. Keep `/healthz` and
-`/readyz` private.
+Firewall the private gateway port so only NPM can reach it. This prevents
+unauthorized connections but does not encrypt traffic: use plaintext HTTP only
+on a co-hosted or isolated trusted link, otherwise use encrypted networking or a
+TLS tunnel. Do not forward the private gateway port to the Internet. Keep
+`/healthz` and `/readyz` private.
 
 Before enabling a connector, verify:
 
-1. `https://netbox.calan.co/.well-known/oauth-protected-resource/mcp` returns
-   resource `https://netbox.calan.co/mcp` and the expected Authentik issuer.
-2. `POST https://netbox.calan.co/mcp` without a Bearer token returns `401` with
+1. `https://<PUBLIC_MCP_HOST>/.well-known/oauth-protected-resource/mcp` returns
+   resource `https://<PUBLIC_MCP_HOST>/mcp` and the expected Authentik issuer.
+2. `POST https://<PUBLIC_MCP_HOST>/mcp` without a Bearer token returns `401` with
    `WWW-Authenticate: Bearer resource_metadata=...`, not an HTML login redirect.
-3. A valid scoped token succeeds; expired, wrong-audience, and missing-scope
+3. A valid scoped token is used in a valid MCP `initialize` POST: JSON body,
+   `Content-Type: application/json`, and an `Accept` header containing both
+   `application/json` and `text/event-stream`. Expect `200` and an
+   `Mcp-Session-Id` response header. Expired, wrong-audience, and missing-scope
    tokens fail.
 4. The NetBox API sees only its configured server token, never the caller Bearer
    token.
+
+For the planned virtual path, replace `<PUBLIC_MCP_HOST>` with
+`netbox.calan.co`.
 
 The resource metadata endpoint lets OAuth-aware clients discover the Authentik
 authorization server from the `401` Bearer challenge.
