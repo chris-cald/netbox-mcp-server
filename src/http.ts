@@ -16,6 +16,7 @@ import {
   assertOidcConfig,
   createOidcAuthenticator,
   loadOidcConfig,
+  resolveOidcConfig,
   OidcAuthenticationError,
   type OidcConfig,
   type OidcAuthenticator,
@@ -63,8 +64,20 @@ export function loadTransportConfig(
   const host = DEFAULT_HTTP_HOST;
   const port = DEFAULT_HTTP_PORT;
   const allowedHosts = loadAllowedHosts(env);
-  const oidc = loadOidcConfig(env, true);
+  // Discovery is asynchronous and resolved before startup or --check completes.
+  const oidc = env.NETBOX_OIDC_DISCOVERY_URL?.trim()
+    ? undefined
+    : loadOidcConfig(env, true);
   return { transport: "http", host, port, allowedHosts, oidc };
+}
+
+/** Resolve remote OIDC discovery only after the synchronous transport shape is valid. */
+export async function resolveTransportConfig(
+  env: NodeJS.ProcessEnv = process.env,
+): Promise<TransportConfig> {
+  const config = loadTransportConfig(env);
+  if (config.transport === "stdio") return config;
+  return { ...config, oidc: await resolveOidcConfig(env, true) };
 }
 
 function loadAllowedHosts(env: NodeJS.ProcessEnv): string[] {

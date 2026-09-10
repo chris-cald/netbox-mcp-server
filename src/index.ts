@@ -14,7 +14,11 @@
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 
 import { loadConfig } from "./config.js";
-import { createStreamableHttpServer, loadTransportConfig } from "./http.js";
+import {
+  createStreamableHttpServer,
+  loadTransportConfig,
+  resolveTransportConfig,
+} from "./http.js";
 import { buildServer, listTools, SERVER_NAME, SERVER_VERSION } from "./server.js";
 
 const EX_CONFIG = 78;
@@ -42,8 +46,9 @@ const HELP = [
   "                      connection. Prefer installing your internal root CA.",
   "  NETBOX_TRANSPORT    stdio (default) or http.",
   "  NETBOX_HTTP_ALLOWED_HOSTS Required for HTTP: comma-separated published Host values.",
-  "  NETBOX_OIDC_ISSUER  Required for HTTP: canonical HTTPS issuer.",
-  "  NETBOX_OIDC_JWKS_URL Required for HTTP: canonical HTTPS JWKS URL.",
+  "  NETBOX_OIDC_DISCOVERY_URL Optional HTTPS OIDC discovery URL; derives issuer and JWKS URL.",
+  "  NETBOX_OIDC_ISSUER  Required for HTTP without discovery: canonical HTTPS issuer.",
+  "  NETBOX_OIDC_JWKS_URL Required for HTTP without discovery: canonical HTTPS JWKS URL.",
   "  NETBOX_OIDC_AUDIENCE Required for HTTP: exact access-token audience.",
   "  NETBOX_OIDC_REQUIRED_SCOPE Required for HTTP: exact access-token scope.",
   "  NETBOX_OIDC_RESOURCE_URL Required for HTTP: canonical HTTPS /mcp resource URL.",
@@ -82,7 +87,7 @@ async function runStdio(): Promise<void> {
 async function runHttp(): Promise<void> {
   try {
     await validateNetBoxConfig();
-    const config = loadTransportConfig();
+    const config = await resolveTransportConfig();
     if (config.transport !== "http") throw new Error("NETBOX_TRANSPORT must be http.");
     const server = createStreamableHttpServer(config);
     await server.listen();
@@ -124,7 +129,7 @@ async function main(): Promise<void> {
     try {
       const config = loadConfig();
       await config.credentials.getToken();
-      loadTransportConfig();
+      await resolveTransportConfig();
       console.log(
         `ok: ${SERVER_NAME} v${SERVER_VERSION} configured for ${config.baseUrl}`,
       );

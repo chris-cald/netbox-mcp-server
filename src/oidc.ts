@@ -55,6 +55,89 @@ export function loadOidcConfig(
   return config;
 }
 
+/** Resolve optional OIDC discovery before the HTTP listener starts. */
+export async function resolveOidcConfig(
+  env: NodeJS.ProcessEnv,
+  required: boolean,
+  warn: (message: string) => void = console.error,
+): Promise<OidcConfig | undefined> {
+  const discoveryUrl = (env.NETBOX_OIDC_DISCOVERY_URL ?? "").trim();
+  if (!discoveryUrl) return loadOidcConfig(env, required);
+  assertCanonicalHttpsUrl("NETBOX_OIDC_DISCOVERY_URL", discoveryUrl);
+
+  let discovered: Pick<OidcConfig, "issuer" | "jwksUrl">;
+  try {
+    discovered = await fetchOidcDiscovery(discoveryUrl);
+  } catch {
+    try {
+      const manual = loadOidcConfig(env, required);
+      if (!manual) throw new Error("missing manual configuration");
+      warn(
+        "warning: OIDC discovery failed; using manually configured issuer and JWKS URL.",
+      );
+      return manual;
+    } catch {
+      throw new Error(
+        "OIDC discovery failed and manual NETBOX_OIDC_ISSUER and NETBOX_OIDC_JWKS_URL configuration is incomplete or invalid.",
+      );
+    }
+  }
+
+  const manualIssuer = (env.NETBOX_OIDC_ISSUER ?? "").trim();
+  const manualJwksUrl = (env.NETBOX_OIDC_JWKS_URL ?? "").trim();
+  if (Boolean(manualIssuer) !== Boolean(manualJwksUrl)) {
+    throw new Error(
+      "NETBOX_OIDC_ISSUER and NETBOX_OIDC_JWKS_URL must be supplied together when NETBOX_OIDC_DISCOVERY_URL is set.",
+    );
+  }
+  if (manualIssuer) {
+    assertCanonicalHttpsUrl("NETBOX_OIDC_ISSUER", manualIssuer);
+    assertCanonicalHttpsUrl("NETBOX_OIDC_JWKS_URL", manualJwksUrl);
+    if (manualIssuer !== discovered.issuer || manualJwksUrl !== discovered.jwksUrl) {
+      throw new Error(
+        "Manual NETBOX_OIDC_ISSUER and NETBOX_OIDC_JWKS_URL must exactly match OIDC discovery.",
+      );
+    }
+  }
+
+  const config = {
+    issuer: discovered.issuer,
+    jwksUrl: discovered.jwksUrl,
+    audience: (env.NETBOX_OIDC_AUDIENCE ?? "").trim(),
+    ...((env.NETBOX_OIDC_REQUIRED_SCOPE ?? "").trim()
+      ? { requiredScope: (env.NETBOX_OIDC_REQUIRED_SCOPE ?? "").trim() }
+      : {}),
+    ...((env.NETBOX_OIDC_RESOURCE_URL ?? "").trim()
+      ? { resourceUrl: (env.NETBOX_OIDC_RESOURCE_URL ?? "").trim() }
+      : {}),
+  };
+  assertOidcConfig(config);
+  return config;
+}
+
+async function fetchOidcDiscovery(
+  discoveryUrl: string,
+): Promise<Pick<OidcConfig, "issuer" | "jwksUrl">> {
+  const response = await fetch(discoveryUrl, {
+    headers: { accept: "application/json" },
+    redirect: "error",
+    signal: AbortSignal.timeout(JWKS_TIMEOUT_MS),
+  });
+  if (!response.ok) throw new Error("OIDC discovery request failed");
+  const document: unknown = await response.json();
+  if (!document || typeof document !== "object") {
+    throw new Error("OIDC discovery response is not an object");
+  }
+  const { issuer, jwks_uri: jwksUri } = document as Record<string, unknown>;
+  if (typeof issuer !== "string" || typeof jwksUri !== "string") {
+    throw new Error("OIDC discovery response is missing issuer or jwks_uri");
+  }
+  const config = { issuer: issuer.trim(), jwksUrl: jwksUri.trim() };
+  assertCanonicalHttpsUrl("OIDC discovery issuer", config.issuer);
+  assertCanonicalHttpsUrl("OIDC discovery jwks_uri", config.jwksUrl);
+  return config;
+}
+
 export function assertOidcConfig(config: OidcConfig): void {
   if (!config.issuer.trim()) {
     throw new Error("Missing required environment variable NETBOX_OIDC_ISSUER.");
