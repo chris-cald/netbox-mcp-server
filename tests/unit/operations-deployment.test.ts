@@ -74,63 +74,48 @@ describe("production container deployment", () => {
     expect(containerDeployment).toMatch(/Never place an Authentik client secret, JWT/i);
   });
 
-  it("uses the requested field-ordered operator-guide hierarchy", () => {
+  it("names every evidence-backed agent integration without a catch-all heading", () => {
     expect(readme).toContain("docs/operator-setup.md");
-    const requestedOutline = [
-      "## Installation",
-      "### Container",
-      "#### Compose",
-      "##### Docker",
-      "##### Podman",
-      "#### Pods",
-      "##### Kubernetes",
-      "##### Podman",
-      "#### Direct",
-      "##### Docker",
-      "##### Podman",
-      "### Package Manager",
-      "#### Choco",
-      "#### Homebrew",
-      "#### apt",
-      "#### dnf",
-      "#### apk",
-      "## Integration",
-      "### Reverse Proxy",
-      "#### nginx",
-      "#### NPM",
-      "#### haproxy",
-      "#### caddy",
-      "### Authorization",
-      "#### Authentik et al",
-      "### Agent",
+    const agentHeadings = [
       "#### ChatGPT",
       "#### Codex",
-      "#### Claude",
+      "#### Claude Desktop",
+      "#### Claude Code",
       "#### Cursor",
-      "#### Copilot",
-      "#### et al",
+      "#### GitHub Copilot",
+      "#### Gemini CLI",
+      "#### Windsurf",
+      "#### Cline",
+      "#### Roo Code",
+      "#### Continue",
     ];
-    const headings = operatorSetup.match(/^#{2,5} .+$/gm) ?? [];
+    for (const heading of agentHeadings) {
+      const start = operatorSetup.indexOf(heading);
+      const next = operatorSetup.indexOf("#### ", start + heading.length);
+      const section = operatorSetup.slice(start, next === -1 ? undefined : next);
 
-    expect(headings.slice(0, requestedOutline.length)).toEqual(requestedOutline);
-    expect(headings[requestedOutline.length]).toBe("## Validation and rollback");
+      expect(start).toBeGreaterThanOrEqual(0);
+      expect(section).toMatch(/https:\/\//);
+      expect(section).toMatch(/1\./);
+    }
+    expect(operatorSetup).not.toMatch(/\bet al\b/i);
   });
 
-  it("documents defaults, values, sources, and order without inventing installers", () => {
+  it("uses numbered procedures and default/value/source tables without invented artifacts", () => {
     for (const fieldTable of [
-      /\|\s+Field\s+\|\s+Default \/ leave\s+\|\s+Set\s+\|\s+Value source\s+\|/,
-      /\|\s+NPM field\s+\|\s+`\/mcp` and `\/\.well-known\/oauth-protected-resource\/mcp`\s+\|\s+Source\s+\|/,
-      /\|\s+Field\s+\|\s+Set\s+\|\s+Value source\s+\|/,
+      /\|\s+Compose field\s+\|\s+Leave default\s+\|\s+Change to\s+\|\s+Source\s+\|/,
+      /\|\s+NPM field\s+\|.*\|\s+Leave default \/ why\s+\|\s+Source\s+\|/,
+      /\|\s+Authentik field\s+\|\s+Enter\s+\|\s+Leave default \/ reason\s+\|\s+Source\s+\|/,
     ]) {
       expect(operatorSetup).toMatch(fieldTable);
     }
-    expect(operatorSetup).toContain("**Provision order:**");
-    expect(operatorSetup).toContain("no project-specific OS package");
+    expect(operatorSetup).toContain("1. Log in to Authentik Admin Interface");
+    expect(operatorSetup).toContain("1. Open ChatGPT");
     expect(operatorSetup).toContain(
-      "no Kubernetes manifest, Helm chart, Kustomize overlay",
+      "No Kubernetes manifest, Helm chart, Kustomize overlay",
     );
     expect(operatorSetup).toMatch(
-      /Never place a NetBox\s+token, OAuth client secret, JWT/i,
+      /never put a NetBox\s+token, OAuth client secret, JWT/i,
     );
   });
 

@@ -1,192 +1,233 @@
-# Operator setup guide
+# Operator setup: concrete procedures
 
-This is a field-ordered provisioning guide, not an installer. Never place a NetBox
-token, OAuth client secret, JWT, refresh token, or signing key in the repository, a
-shell profile, a proxy UI, or a support request. `NETBOX_URL` plus exactly one of
-`NETBOX_TOKEN` and `NETBOX_TOKEN_FILE` is always required. HTTP also requires
-`NETBOX_HTTP_ALLOWED_HOSTS`, issuer, JWKS URL, audience, scope, and resource URL.
+This guide changes **no** live system. Replace every `<PLACEHOLDER>` from the preparation
+table; never put a NetBox token, OAuth client secret, JWT, refresh token, or signing key in
+this repository, a shell profile, NPM, or a ticket.
 
-**Common collection order:** (1) NetBox URL and a managed server-token mount; (2)
-runtime path/image; (3) private gateway endpoint and public DNS/TLS hostname; (4) OAuth
-discovery issuer/JWKS and provider audience/scope; (5) final public `https://<HOST>/mcp`
-resource URL; (6) client redirect registration data from the actual agent.
+## Preparation
+
+Collect in this order before clicking or running anything:
+
+| Placeholder                        | Entered value                                         | Source                         |
+| ---------------------------------- | ----------------------------------------------------- | ------------------------------ |
+| `<NETBOX_URL>`                     | `https://<netbox-host>` (no `/api`)                   | NetBox operator                |
+| `<TOKEN_FILE>`                     | managed host secret-file path                         | secret manager                 |
+| `<PRIVATE_HOST>`, `<PRIVATE_PORT>` | gateway's private DNS name and Compose-published port | deployment/network operator    |
+| `<PUBLIC_MCP_HOST>`                | public DNS name                                       | DNS/TLS operator               |
+| `<RESOURCE_URL>`                   | `https://<PUBLIC_MCP_HOST>/mcp`                       | public DNS/TLS design          |
+| `<ISSUER>`, `<JWKS_URI>`           | exact `issuer`, `jwks_uri` in discovery               | authorization-server discovery |
+| `<AUDIENCE>`, `<SCOPE>`            | MCP-only audience and required scope                  | provider claim/scope policy    |
+| `<NPX>`                            | absolute `npx`/`npx.cmd` path                         | `command -v npx` / `where npx` |
+
+Gateway HTTP values are exactly:
+
+```text
+NETBOX_URL=<NETBOX_URL>
+NETBOX_TOKEN_FILE=/run/secrets/netbox_token
+NETBOX_TRANSPORT=http
+NETBOX_HTTP_ALLOWED_HOSTS=<PRIVATE_HOST>:<PRIVATE_PORT>,<PUBLIC_MCP_HOST>
+NETBOX_OIDC_ISSUER=<ISSUER>
+NETBOX_OIDC_JWKS_URL=<JWKS_URI>
+NETBOX_OIDC_AUDIENCE=<AUDIENCE>
+NETBOX_OIDC_REQUIRED_SCOPE=<SCOPE>
+NETBOX_OIDC_RESOURCE_URL=<RESOURCE_URL>
+```
+
+The server token is for NetBox only. The gateway validates the caller Bearer token and never
+forwards it to NetBox.
 
 ## Installation
 
-Provision an operating-system Node.js runtime satisfying `package.json` (`>=20.11`) before
-selecting one of the paths below. The supported distribution is npm/npx:
-`<absolute npx path> -y @zenixsolutions/netbox-mcp`. This project ships no OS package,
-formula, chart, manifest, or direct-run recipe.
-
 ### Container
 
-**Provision order:** collect the common values; select Docker or Podman; render
-`compose.yaml`; verify only secret _paths_ appear; then start privately. **Defaults:** the
-supplied Compose profile is non-root/read-only, HTTP transport, and has no host-port
-mapping. **Fields:** set `NETBOX_URL`, a managed token source, allowed hosts, and all HTTP
-OIDC fields; values come from the common collection order.
+**Prerequisites:** a managed token file, Docker or Podman, and values above. **Do not** add
+`NETBOX_HTTP_HOST` or `NETBOX_HTTP_PORT`: Compose owns listener/port mapping.
 
 #### Compose
 
-**Provision order:** set the Compose secret source, then gateway variables, then an
-operator-owned network/port overlay only if required. **Defaults:** use `compose.yaml` as
-shipped; keep `ports:` absent and do not add `NETBOX_HTTP_HOST` or `NETBOX_HTTP_PORT`.
-**Fields:**
+1. In the source checkout, create an operator-owned Compose override/secret definition; do
+   not modify `compose.yaml` to embed a secret.
+2. Set its secret **source** to `<TOKEN_FILE>`; leave service-side
+   `NETBOX_TOKEN_FILE=/run/secrets/netbox_token` unchanged.
+3. Set exactly the preparation-table HTTP values in the service environment. Leave the
+   supplied image build, non-root user, read-only filesystem, dropped capabilities, and base
+   `ports:` setting unchanged.
+4. Render first, then start privately; confirm the rendered output contains the secret path,
+   never its contents.
+5. Roll back by stopping the new container and restoring the prior override/image; remove a
+   public proxy route before reopening an old deployment.
 
-| Field                       | Default / leave                          | Set                                                | Value source                 |
-| --------------------------- | ---------------------------------------- | -------------------------------------------------- | ---------------------------- |
-| `NETBOX_URL`                | none                                     | NetBox base URL without `/api`                     | NetBox operator              |
-| `NETBOX_TOKEN_FILE`         | service path `/run/secrets/netbox_token` | Compose secret source on host; retain service path | Secret manager               |
-| `NETBOX_TRANSPORT`          | `http` in supplied profile               | leave                                              | Project file                 |
-| `NETBOX_HTTP_ALLOWED_HOSTS` | `localhost` in un-published profile      | exact private/public `Host` values                 | Network/proxy design         |
-| `NETBOX_OIDC_*`             | none                                     | issuer, JWKS, audience, scope, resource URL        | Authorization + proxy design |
-| `ports:`                    | absent                                   | leave absent in base profile                       | Project file                 |
+| Compose field               | Leave default                          | Change to                                    | Source                 |
+| --------------------------- | -------------------------------------- | -------------------------------------------- | ---------------------- |
+| `NETBOX_TOKEN_FILE`         | `/run/secrets/netbox_token` in service | host Compose secret source is `<TOKEN_FILE>` | secret manager         |
+| `NETBOX_TRANSPORT`          | `http`                                 | leave                                        | project Compose file   |
+| `NETBOX_HTTP_ALLOWED_HOSTS` | profile's private default              | preparation value                            | network design         |
+| `NETBOX_OIDC_*`             | no defaults                            | five preparation values                      | discovery/provider/DNS |
+| `ports:`                    | absent base mapping                    | leave absent; use approved overlay only      | deployment operator    |
 
 ##### Docker
 
-**Provision order:** install Docker/Compose, render the supplied Compose file, then run it
-privately. **Defaults:** leave image build, non-root/read-only settings, and no published
-port unchanged. **Fields:** use the Compose table; Docker supplies only the runtime and
-secret-mount implementation. **Status:** supported through `compose.yaml`; no separate
-Docker-only command is maintained.
+1. Verify `docker compose version` and `docker version`; use the project Compose profile.
+2. Run `docker compose --profile deployment config` and inspect it for the expected secret
+   **path** and values, never a secret value.
+3. Run `docker compose --profile deployment up -d`; verify private health endpoints.
+4. Stop with `docker compose --profile deployment down` for rollback.
+
+**Defaults/fields:** use the Compose table; no Docker-only image, port, or `docker run`
+command is supported.
 
 ##### Podman
 
-**Provision order:** install a Compose-compatible Podman implementation, render the same
-file, verify equivalent secret/read-only/network behavior, then run privately. **Defaults:**
-do not substitute a different image or port mapping. **Fields:** use the Compose table;
-secret-mount syntax and runtime path come from the local Podman documentation. **Status:**
-manual compatibility path, not a separate supported Compose file.
+1. Verify the installed Compose-compatible Podman implementation renders the same profile.
+2. Run its documented Compose equivalent of `config`; verify non-root, read-only, secret-path,
+   and private-network semantics match Docker output.
+3. Start it with that implementation's documented Compose command; verify privately.
+4. Stop via the same implementation for rollback.
+
+**Defaults/fields:** use the Compose table. This is a manual compatibility path: no separate
+Podman Compose file is shipped.
 
 #### Pods
 
-**Provision order:** first build an organization-owned pod/workload definition, then apply
-secret, security, network, and OIDC requirements before starting it. **Defaults:** none:
-this repository ships no Kubernetes manifest, Helm chart, Kustomize overlay, or Podman pod
-definition. **Fields:** every workload must map the managed token to
-`NETBOX_TOKEN_FILE=/run/secrets/netbox_token`, set the Compose-table HTTP/OIDC values, and
-use the private/public endpoint values from the common collection order.
+No Kubernetes manifest, Helm chart, Kustomize overlay, or Podman pod definition is shipped.
+Do not fabricate one from this guide.
 
 ##### Kubernetes
 
-**Provision order:** define workload security; mount a managed secret; add NetworkPolicy;
-set gateway fields; then private health checks. **Defaults:** no YAML/chart is supplied.
-**Fields:** non-root identity, read-only root filesystem, dropped capabilities, bounded
-tmp/cache, managed secret mount, NetworkPolicy limited to proxy source, and private
-`/healthz`/`/readyz` probes. **Value sources:** cluster policy, secret manager, and common
-collection order. **Status:** manual/unsupported; do not infer a manifest from this guide.
+1. Have the cluster operator create a workload from their approved baseline.
+2. Set non-root identity, read-only root filesystem, dropped capabilities, bounded tmp/cache,
+   a managed secret mounted at `/run/secrets/netbox_token`, and a NetworkPolicy allowing only
+   the proxy to the private port.
+3. Set exactly the preparation values as workload environment variables; keep health endpoints
+   private.
+4. Apply the operator-owned manifest, verify metadata and 401 privately, then roll back with
+   the cluster operator's prior revision.
 
-##### Podman
+**Defaults:** none. **Value sources:** cluster policy, secret manager, and Preparation.
+**Status:** manual/unsupported; the exact manifest must be supplied and reviewed by the
+cluster operator.
 
-**Provision order:** define equivalent Podman pod security/network/secret settings, set
-gateway fields, and validate privately. **Defaults:** no pod definition is supplied.
-**Fields:** same workload, token-path, network, and health requirements as Kubernetes.
-**Value sources:** local Podman documentation, secret manager, and common collection order.
-**Status:** manual/unsupported; do not invent a `podman pod` command from this guide.
+##### Podman pod
+
+1. Have the runtime operator create an approved pod definition with equivalent security,
+   secret mount, and private networking.
+2. Mount the token at `/run/secrets/netbox_token` and set the Preparation values.
+3. Validate health, metadata, and 401 privately; remove the pod and restore the previous
+   runtime definition on rollback.
+
+**Defaults:** none. **Status:** manual/unsupported; no `podman pod` command is provided.
 
 #### Direct
 
-**Provision order:** prefer Compose; only use a locally-reviewed runtime invocation after
-reproducing its secret, security, network, OIDC, and lifecycle properties. **Defaults:** no
-direct command is maintained. **Fields:** all Compose-table values plus explicit
-read-only/non-root/secret-mount/network settings. **Value sources:** local runtime
-reference and common collection order. **Status:** manual/unsupported.
+Direct execution is not maintained because it is too easy to omit a secret mount, read-only
+filesystem, network restriction, or restart policy. Use Compose.
 
 ##### Docker
 
-**Provision order:** use Compose instead; otherwise review a local run specification before
-execution. **Defaults:** no `docker run` command exists here. **Fields:** preserve every
-Compose security field, set the Compose values, and expose no unauthenticated port.
-**Value sources:** Docker documentation and common collection order. **Status:**
-manual/unsupported.
+**Prerequisite:** an operator-reviewed invocation reproducing every Compose security property.
+
+1. Do not use a command copied from this document; prepare it locally from Docker's reference.
+2. Require non-root/read-only, managed token mount at the service path, Preparation fields,
+   and no unauthenticated published port.
+3. Validate privately; stop/remove it and restore the previous runtime definition to roll back.
+
+**Defaults:** none. **Status:** manual/unsupported.
 
 ##### Podman
 
-**Provision order:** use Compose instead; otherwise review a local run specification before
-execution. **Defaults:** no `podman run` command exists here. **Fields:** preserve every
-Compose security field, set the Compose values, and expose no unauthenticated port.
-**Value sources:** Podman documentation and common collection order. **Status:**
-manual/unsupported.
+**Prerequisite:** an operator-reviewed invocation reproducing every Compose security property.
+
+1. Do not use a command copied from this document; prepare it locally from Podman's reference.
+2. Require non-root/read-only, managed token mount at the service path, Preparation fields,
+   and no unauthenticated published port.
+3. Validate privately; stop/remove it and restore the previous runtime definition to roll back.
+
+**Defaults:** none. **Status:** manual/unsupported.
 
 ### Package Manager
 
-**Provision order:** use the platform package manager only to obtain a supported Node.js
-runtime, verify `node --version`, then record the absolute `npx` path and use npm/npx.
-**Defaults:** install no project-specific OS package. **Fields:** Node version `>=20.11` and
-absolute runtime path; values come from `package.json` and `command -v npx` (or `where
-npx` on Windows). All entries below are manual prerequisites, not project package recipes.
+The project ships only an npm package, `@zenixsolutions/netbox-mcp`. It ships no Chocolatey,
+Homebrew, apt, dnf, or apk package. Each distinct procedure below installs a compatible Node
+runtime only; then run `<NPX> -y @zenixsolutions/netbox-mcp --version`.
 
 #### Choco
 
-**Provision order:** install/upgrade a supported Node.js runtime, verify its version, then
-use absolute `npx.cmd`. **Defaults:** no Chocolatey package name is prescribed. **Fields:**
-Node version/path from `package.json` and `where npx`. **Status:** manual prerequisite.
+1. Use your approved Chocolatey policy to install/upgrade Node.js; this guide deliberately
+   provides no unverified package formula.
+2. Run `node --version` (must satisfy `>=20.11`) and `where npx`.
+3. Enter the returned absolute `npx.cmd` as `<NPX>` in the chosen agent configuration.
+4. Roll back with your Windows package-management policy.
+
+**Defaults:** no project package. **Value source:** `package.json`, local `where` output.
 
 #### Homebrew
 
-**Provision order:** install/upgrade supported Node.js, verify version, then use absolute
-`npx`. **Defaults:** no project formula/tap is prescribed. **Fields:** Node version/path
-from `package.json` and `command -v npx`. **Status:** manual prerequisite.
+1. Use your approved Homebrew policy to install/upgrade Node.js; no project formula/tap exists.
+2. Run `node --version` and `command -v npx`.
+3. Enter the returned absolute path as `<NPX>`; do not use bare `npx` in GUI clients.
+4. Roll back with your Homebrew policy.
+
+**Defaults:** no project formula. **Value source:** `package.json`, local shell output.
 
 #### apt
 
-**Provision order:** install a supported Node.js source, verify version, then use absolute
-`npx`. **Defaults:** no apt package/version is prescribed because distro packages vary.
-**Fields:** Node version/path from `package.json` and `command -v npx`. **Status:** manual
-prerequisite.
+1. Obtain Node.js from an approved source; no apt package/version is specified because distro
+   versions differ.
+2. Verify `node --version` and `command -v npx`.
+3. Use that absolute `<NPX>` in the agent configuration; roll back through approved apt policy.
+
+**Defaults:** no project package. **Value source:** `package.json`, local shell output.
 
 #### dnf
 
-**Provision order:** install a supported Node.js source, verify version, then use absolute
-`npx`. **Defaults:** no dnf package/version is prescribed. **Fields:** Node version/path
-from `package.json` and `command -v npx`. **Status:** manual prerequisite.
+1. Obtain Node.js from an approved source; no dnf package/version is specified.
+2. Verify `node --version` and `command -v npx`.
+3. Use that absolute `<NPX>`; roll back through approved dnf policy.
+
+**Defaults:** no project package. **Value source:** `package.json`, local shell output.
 
 #### apk
 
-**Provision order:** install a supported Node.js source, verify version, then use absolute
-`npx`. **Defaults:** no apk package/version is prescribed. **Fields:** Node version/path
-from `package.json` and `command -v npx`. **Status:** manual prerequisite.
+1. Obtain Node.js from an approved source; no apk package/version is specified.
+2. Verify `node --version` and `command -v npx`.
+3. Use that absolute `<NPX>`; roll back through approved apk policy.
+
+**Defaults:** no project package. **Value source:** `package.json`, local shell output.
 
 ## Integration
 
-**Provision order:** make the gateway private and OIDC-configured before adding a proxy,
-then authorize the proxy/private network, then register a client. **Defaults:** stdio is the
-normal transport; no public HTTP endpoint is enabled by this guide. **Fields:** public HTTPS
-resource URL, exact allowed hosts, and OIDC fields derive from the common collection order.
-
 ### Reverse Proxy
 
-**Provision order:** choose public HTTPS URL; issue certificate; configure both MCP paths
-without rewriting; preserve Host/Authorization; restrict upstream network; then test 401
-metadata before a connector. **Defaults:** retain existing application default route and
-TLS enforcement. **Fields:** route `/mcp` and
-`/.well-known/oauth-protected-resource/mcp`, preserve public `Host` and `Authorization`,
-disable buffering, and use encrypted upstream networking unless co-hosted/isolated.
-**Value sources:** DNS/TLS design, gateway metadata, and proxy documentation.
+1. Choose `<RESOURCE_URL>` and obtain a public TLS certificate first.
+2. Route **both** `/mcp` and `/.well-known/oauth-protected-resource/mcp` to the private
+   gateway with no URI rewrite or slash normalization.
+3. Preserve public `Host` and caller `Authorization`; disable buffering for streaming.
+4. Allow only the proxy to reach `<PRIVATE_HOST>:<PRIVATE_PORT>`. Plain HTTP is allowed only
+   on a co-hosted or isolated trusted path; otherwise use encrypted networking/TLS tunnel.
+5. Verify metadata and 401 before enabling an agent. Roll back by removing both proxy routes.
 
 #### nginx
 
-**Provision order:** apply the Reverse Proxy baseline, then test each path privately.
-**Defaults:** no nginx configuration is supplied or validated. **Fields:** both no-rewrite
-locations; public Host; Authorization; HTTP/1.1; disabled buffering; protected upstream.
-**Value sources:** Reverse Proxy baseline and nginx documentation. **Status:** manual.
+No tested nginx configuration is shipped. Apply the five Reverse Proxy steps with nginx's
+official syntax; leave unrelated server settings unchanged. **Fields:** exact two paths,
+public Host, Authorization, HTTP/1.1, buffering disabled, protected upstream. **Source:**
+Preparation and nginx documentation. **Status:** manual.
 
 #### NPM
 
-**Provision order:** retain Proxy Host default route; add both Custom Locations; apply
-advanced headers; verify metadata/401; then enable connector. **Defaults:** retain existing
-certificate/Force SSL and default route; do not apply Access Lists or cookie-login auth to
-the MCP locations. **Fields:**
+**UI navigation:** NPM Dashboard → **Hosts** → **Proxy Hosts** → select the existing public
+NetBox host → **Custom Locations** → **Add Location**, once for each path below.
 
-| NPM field           | `/mcp` and `/.well-known/oauth-protected-resource/mcp`       | Source             |
-| ------------------- | ------------------------------------------------------------ | ------------------ |
-| Forward Scheme      | `http` only co-hosted/isolated; otherwise encrypted upstream | Network design     |
-| Forward Hostname/IP | private gateway hostname                                     | Network design     |
-| Forward Port        | private gateway port                                         | Deployment overlay |
-| URI handling        | no rewrite/slash normalization                               | Gateway paths      |
-| Websockets Support  | enable on Proxy Host                                         | NPM UI             |
+| NPM field           | `/mcp` and `/.well-known/oauth-protected-resource/mcp`       | Leave default / why                         | Source              |
+| ------------------- | ------------------------------------------------------------ | ------------------------------------------- | ------------------- |
+| Location            | enter each exact path                                        | no rewrite or slash change                  | gateway routes      |
+| Forward Scheme      | `http` only co-hosted/isolated; otherwise encrypted upstream | do not send Bearer over untrusted plaintext | network design      |
+| Forward Hostname/IP | `<PRIVATE_HOST>`                                             | do not use public host                      | deployment operator |
+| Forward Port        | `<PRIVATE_PORT>`                                             | do not guess `3000`                         | deployment overlay  |
+| Websockets Support  | enabled on Proxy Host                                        | retain cert / Force SSL                     | NPM UI              |
+| Access List         | leave existing Proxy Host setting unchanged                  | NPM scopes it to the whole Proxy Host       | NPM behavior        |
 
-Use only this Advanced configuration (NPM generates `proxy_pass`):
+In **Advanced** for each Custom Location, paste only:
 
 ```nginx
 proxy_http_version 1.1;
@@ -197,116 +238,175 @@ proxy_set_header Authorization $http_authorization;
 proxy_set_header X-Forwarded-Proto $scheme;
 ```
 
-**Status:** current documented UI integration.
+Leave NPM-generated `proxy_pass` alone; do not add one. NPM Access Lists are scoped to the
+whole Proxy Host, so they cannot safely exempt only MCP paths. If the existing NetBox Proxy
+Host has an Access List or cookie-login authentication, keep it unchanged and create a
+separate HTTPS Proxy Host/hostname for MCP instead. Click **Save** after each location,
+restart no service unless NPM says so, verify both paths, and delete the two locations to roll
+back. NPM reference: <https://nginxproxymanager.com/advanced-config/>.
 
 #### haproxy
 
-**Provision order:** apply the Reverse Proxy baseline, then test each path privately.
-**Defaults:** no HAProxy configuration is supplied or validated. **Fields:** both no-rewrite
-paths; public Host; Authorization; streaming-safe response behavior; protected upstream.
-**Value sources:** Reverse Proxy baseline and HAProxy documentation. **Status:** manual.
+No tested HAProxy configuration is shipped. Apply the five Reverse Proxy steps; leave
+unrelated frontend/backend defaults unchanged. **Fields/source/status:** same as nginx, using
+HAProxy documentation. **Status:** manual.
 
 #### caddy
 
-**Provision order:** apply the Reverse Proxy baseline, then test each path privately.
-**Defaults:** no Caddy configuration is supplied or validated. **Fields:** both no-rewrite
-paths; public Host; Authorization; streaming-safe response behavior; protected upstream.
-**Value sources:** Reverse Proxy baseline and Caddy documentation. **Status:** manual.
+No tested Caddy configuration is shipped. Apply the five Reverse Proxy steps; leave unrelated
+site defaults unchanged. **Fields/source/status:** same as nginx, using Caddy documentation.
+**Status:** manual.
 
 ### Authorization
 
-**Provision order:** define MCP-only audience/scope and authorization policy; create provider
-and client registration; read discovery; set gateway fields; then test token failures before
-proxy exposure. **Defaults:** gateway accepts only RS256/ES256 JWS tokens and uses no
-provider-specific secret. **Fields:** issuer, JWKS URI, audience, required scope, and exact
-public resource URL; sources are discovery, provider policy, and DNS/TLS design.
+#### Authentik
 
-#### Authentik et al
+This is an MCP-specific application/provider; do **not** reuse the NetBox UI client. The
+reference procedure it follows is Authentik's NetBox integration:
+<https://integrations.goauthentik.io/documentation/netbox/>.
 
-**Provision order:** create a separate MCP application/provider; configure authorization
-code + PKCE/S256; attach MCP-only audience/scope and restrictive user/group policy; obtain
-discovery; set gateway fields; register only client-provided redirect URIs. **Defaults:**
-disable implicit grant; use explicit consent for third-party/user-facing connectors; do not
-share NetBox UI policy/client; no client secret belongs in gateway/proxy config. **Fields:**
+1. Log in to Authentik Admin Interface → **Applications** → **Applications** → **New
+   Application**.
+2. Enter Application name `NetBox MCP`; set slug `netbox-mcp`; leave group and UI settings at
+   their current defaults; choose policy engine mode required by local policy.
+3. In **Choose a Provider type**, select **OAuth2/OpenID Connect**. In **Configure Provider**,
+   accept/generated provider name, select a locally approved authorization flow, and select an
+   available signing key. Do not copy a client secret to gateway/NPM configuration.
+4. Configure Authorization Code with PKCE/S256 for public/native agent clients; disable the
+   implicit grant. Use explicit consent for third-party/user-facing clients unless a documented
+   first-party policy approves implicit consent.
+5. Create/attach an MCP-only scope `<SCOPE>` and claim mapping emitting audience `<AUDIENCE>`;
+   restrict application/provider bindings to approved users/groups. Values come from
+   authorization policy, not this document.
+6. Add only exact redirect URIs supplied by each agent's current UI/docs. Do not use the
+   NetBox redirect URI (`/oauth/complete/oidc/`), which belongs to NetBox UI SSO, not MCP.
+7. Click **Submit**. Open
+   `https://<AUTHENTIK_HOST>/application/o/netbox-mcp/.well-known/openid-configuration`; copy
+   `issuer` into `<ISSUER>` and `jwks_uri` into `<JWKS_URI>`.
+8. Apply the Preparation gateway environment values, restart only the gateway, then verify
+   metadata, a 401 challenge, valid scoped token, and expired/wrong-audience/missing-scope
+   rejection. Roll back by removing gateway public routes, then disabling bindings/provider.
 
-| Field                        | Set                                           | Value source           |
-| ---------------------------- | --------------------------------------------- | ---------------------- |
-| Provider/application         | separate MCP OAuth2/OIDC provider/application | Authorization policy   |
-| Grant                        | Authorization Code + PKCE/S256                | Connector capability   |
-| `NETBOX_OIDC_ISSUER`         | exact discovery `issuer`                      | Discovery document     |
-| `NETBOX_OIDC_JWKS_URL`       | exact discovery `jwks_uri`                    | Discovery document     |
-| `NETBOX_OIDC_AUDIENCE`       | stable MCP-only audience                      | Provider claim mapping |
-| `NETBOX_OIDC_REQUIRED_SCOPE` | MCP-only required scope                       | Provider scope policy  |
-| `NETBOX_OIDC_RESOURCE_URL`   | `https://<PUBLIC_MCP_HOST>/mcp`               | DNS/TLS design         |
-
-Authentik discovery is normally
-`https://<AUTHENTIK_HOST>/application/o/netbox-mcp/.well-known/openid-configuration`.
-Other authorization servers are provider-neutral/manual: use the same fields and baseline,
-not Authentik UI labels.
+| Authentik field       | Enter                       | Leave default / reason        | Source               |
+| --------------------- | --------------------------- | ----------------------------- | -------------------- |
+| Application name/slug | `NetBox MCP` / `netbox-mcp` | group/UI unchanged            | local naming policy  |
+| Provider type         | OAuth2/OpenID Connect       | —                             | Authentik UI         |
+| Flow                  | Code + PKCE/S256            | implicit disabled             | OAuth baseline       |
+| Signing key           | approved key                | existing algorithm/key policy | Authentik admin      |
+| Scope/audience        | `<SCOPE>` / `<AUDIENCE>`    | MCP-only, no NetBox UI reuse  | authorization policy |
+| Discovery fields      | `<ISSUER>` / `<JWKS_URI>`   | copy exactly                  | discovery document   |
+| Resource URL          | `<RESOURCE_URL>`            | exact public HTTPS `/mcp`     | DNS/TLS design       |
 
 ### Agent
 
-**Provision order:** confirm client transport/OAuth support; collect its exact registration
-and redirect-URI data; configure its endpoint/command; then test the gateway challenge and
-MCP initialize request. **Defaults:** do not guess redirect URIs, client secrets, or remote
-connector support. **Fields:** local clients need absolute executable path and NetBox server
-environment; remote clients need public resource URL and their own OAuth registration data.
-**Value sources:** client vendor documentation and the common collection order.
+All local stdio configurations use this server command and environment:
+
+```json
+{
+  "command": "<NPX>",
+  "args": ["-y", "@zenixsolutions/netbox-mcp"],
+  "env": { "NETBOX_URL": "<NETBOX_URL>", "NETBOX_TOKEN_FILE": "<TOKEN_FILE>" }
+}
+```
+
+Use the actual client UI/path below. Do not commit token values. For remote OAuth, configure
+only `<RESOURCE_URL>` and exact client-provided registration data after the Authentik steps;
+never guess redirect URIs.
 
 #### ChatGPT
 
-**Provision order:** confirm the currently available connector supports remote MCP OAuth;
-collect UI-provided registration values; test challenge/metadata. **Defaults:** do not invent
-a config path or client registration. **Fields:** public resource URL and exact client
-registration/redirect values. **Value sources:** current OpenAI documentation/UI. **Status:**
-manual/client-specific.
+**Evidence:** <https://developers.openai.com/api/docs/guides/developer-mode>. 1. Open ChatGPT
+web → Settings → Apps/Connectors → Developer mode (availability is account-controlled). 2.
+Add a remote MCP connector and enter `<RESOURCE_URL>`; leave authentication selection at the
+UI default until it offers OAuth. 3. Copy only the redirect/client registration data it shows
+into Authentik, save, reconnect, and verify tools. 4. Remove the connector to roll back.
+**Status:** evidence-backed remote path; exact UI fields vary by account.
 
 #### Codex
 
-**Provision order:** for Codex CLI, set absolute `npx` command and `mcp_servers` TOML entry;
-for remote OAuth, confirm client support first. **Defaults:** no secret in shell profile.
-**Fields:** command path, package args, `NETBOX_URL`, exactly one server token source, and
-HTTP/OIDC fields when remote. **Value sources:** `command -v npx`, client docs, common
-collection order. **Status:** local stdio documented; remote manual.
+**Evidence:** <https://developers.openai.com/codex/mcp/>. 1. Open `~/.codex/config.toml`. 2. Add `[mcp_servers.netbox]`, `command = "<NPX>"`, and
+`args = ["-y", "@zenixsolutions/netbox-mcp"]`; under `[mcp_servers.netbox.env]` set
+`NETBOX_URL` and exactly one token source. 3. Leave other tables unchanged; restart Codex. 4. Verify `netbox_*` tools; remove both tables to roll back. **Status:** documented stdio.
 
-#### Claude
+#### Claude Desktop
 
-**Provision order:** use Claude Desktop/Code local-MCP configuration with absolute `npx`, or
-confirm remote OAuth support before registration. **Defaults:** never use bare `npx` for a
-GUI app; no secret in shell profile. **Fields:** command path, package args, server
-environment, and client registration values only if remote. **Value sources:** `command -v
-npx`, Claude documentation, common collection order. **Status:** local stdio documented;
-remote manual.
+**Evidence:** <https://support.claude.com/en/articles/10949351-getting-started-with-local-mcp-servers-on-claude-desktop>.
+
+1. Open `~/Library/Application Support/Claude/claude_desktop_config.json`; back it up. 2. Under
+   existing `mcpServers`, add `netbox` using the JSON template above. 3. Leave existing servers
+   unchanged, validate `python3 -m json.tool`, `chmod 600`, then fully quit/reopen Claude. 4. Verify tools; restore backup to roll back. **Status:** documented stdio.
+
+#### Claude Code
+
+**Evidence:** <https://code.claude.com/docs/en/mcp>. 1. In a shell, set only non-secret URL
+and use a protected token source. 2. Run `claude mcp add netbox -- "<NPX>" -y
+@zenixsolutions/netbox-mcp` with the documented `--env` flags for `NETBOX_URL` and exactly one
+token source. 3. Leave other MCP servers unchanged; run `claude mcp list`. 4. Remove `netbox`
+with Claude Code's documented command to roll back. **Status:** documented stdio.
 
 #### Cursor
 
-**Provision order:** add a local MCP JSON entry with absolute `npx`; confirm remote OAuth
-support before registration. **Defaults:** do not overwrite existing `mcp.json` entries.
-**Fields:** command path, package args, server environment, and remote registration values
-if supported. **Value sources:** `command -v npx`, Cursor docs, common collection order.
-**Status:** local stdio documented; remote manual.
+**Evidence:** <https://cursor.com/docs/mcp>. 1. Open global `~/.cursor/mcp.json` or project
+`.cursor/mcp.json`; back it up. 2. Under `mcpServers`, add `netbox` from the JSON template. 3.
+Leave existing entries unchanged, save valid JSON, and restart Cursor. 4. Verify tools; remove
+only `netbox` to roll back. **Status:** documented stdio.
 
-#### Copilot
+#### GitHub Copilot
 
-**Provision order:** verify current MCP/OAuth support, collect client-provided registration
-data, then test metadata/challenge. **Defaults:** no Copilot config or redirect URI is
-provided here. **Fields:** public resource URL and exact registration values. **Value
-sources:** current GitHub documentation/UI. **Status:** manual/client-specific.
+**Evidence:** <https://docs.github.com/en/copilot/how-tos/copilot-on-github/customize-copilot/configure-mcp-servers>.
 
-#### et al
+1. In VS Code create/open `.vscode/mcp.json`. 2. Add a local stdio server using VS Code's
+   current MCP schema, with `<NPX>`, package args, and environment template. 3. Leave existing
+   servers/tool allowlists unchanged unless policy requires an allowlist; restart/reload VS Code.
+2. Verify tools; delete only the server entry to roll back. **Status:** evidence-backed local
+   MCP; schema is editor-version controlled.
 
-**Provision order:** verify MCP transport, OAuth, redirect, and token capabilities before
-registration. **Defaults:** unlisted agents are unsupported. **Fields:** public resource URL
-and exact vendor-supplied registration values. **Value sources:** vendor documentation and
-common collection order. **Status:** manual until verified.
+#### Gemini CLI
 
-## Validation and rollback
+**Evidence:** <https://geminicli.com/docs/tools/mcp-server/>. 1. Open
+`~/.gemini/settings.json` (user) or `.gemini/settings.json` (project). 2. Add `netbox` beneath
+`mcpServers` with the JSON template fields. 3. Leave trust/tool-policy defaults unchanged
+unless enterprise policy requires them; restart Gemini CLI or use its documented `gemini mcp
+add`. 4. Verify with `gemini mcp list`; remove `netbox` to roll back. **Status:** documented
+stdio/HTTP client; use stdio until remote OAuth is explicitly verified.
 
-**Provision order:** render configuration (no secret values); start privately; verify private
-health; verify RFC 9728 metadata; verify missing-token `401` with `resource_metadata`; send
-a valid JSON MCP `initialize` request with `Content-Type: application/json` and `Accept`
-including `application/json` and `text/event-stream`; expect `200` plus `Mcp-Session-Id`;
-then test expired/wrong-audience/missing-scope failures. **Defaults:** no connector is
-enabled before these checks. **Fields:** expected issuer/resource URL/path come from the
-common collection order. **Rollback:** remove public routes first, then restore prior
-image/config if health, metadata, or token checks fail.
+#### Windsurf
+
+**Evidence:** <https://docs.windsurf.com/windsurf/cascade/mcp>. 1. Open Cascade Settings → MCP
+or its `mcp_config.json`. 2. Add stdio `netbox` with template command/args/env. 3. Leave other
+Cascade/Devin Local settings unchanged; save/restart Cascade. 4. Verify and remove `netbox` to
+roll back. **Status:** evidence-backed for legacy Cascade; do not claim it configures Devin
+Local.
+
+#### Cline
+
+**Evidence:** <https://docs.cline.bot/mcp/mcp-overview>. 1. In VS Code open Cline → MCP Servers
+→ Configure → Configure MCP Servers. 2. Add a `mcpServers.netbox` stdio entry using template
+command/args/env. 3. Leave other entries unchanged; save/restart extension. 4. Verify/remove
+entry. **Status:** evidence-backed; use the extension-selected active config path.
+
+#### Roo Code
+
+**Evidence:** <https://github.com/RooCodeInc/Roo-Code>. 1. Open Roo Code MCP settings and choose
+global `mcp_settings.json` or project `.roo/mcp.json`. 2. Add `mcpServers.netbox` from template. 3. Leave existing entries unchanged; save/restart extension. 4. Verify/remove entry. **Status:**
+configuration locations are evidence-backed from project source; UI behavior is version-specific.
+
+#### Continue
+
+**Evidence:** <https://docs.continue.dev/customize/deep-dives/mcp>. 1. Open Continue
+`config.yaml` or `.continue/mcpServers/`. 2. Add `netbox` as a stdio MCP server with `<NPX>`,
+args, and environment template. 3. Leave unrelated model/agent settings unchanged; reload
+Continue in Agent mode. 4. Verify/remove server. **Status:** documented stdio.
+
+## Verification and rollback
+
+1. Privately check `/healthz` and `/readyz`.
+2. Check `https://<PUBLIC_MCP_HOST>/.well-known/oauth-protected-resource/mcp` returns
+   `<RESOURCE_URL>` and `<ISSUER>`.
+3. Check missing bearer `POST <RESOURCE_URL>` returns `401` with
+   `WWW-Authenticate: Bearer resource_metadata=...`, never login HTML.
+4. Send a valid MCP `initialize` JSON request with `Content-Type: application/json` and Accept
+   containing `application/json` plus `text/event-stream`; expect `200` and `Mcp-Session-Id`.
+5. Confirm expired/wrong-audience/missing-scope tokens fail and NetBox sees only server token.
+6. If any step fails, remove agent connector, remove both proxy paths, stop new gateway, and
+   restore prior private configuration/image.
