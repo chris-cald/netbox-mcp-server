@@ -74,26 +74,63 @@ describe("production container deployment", () => {
     expect(containerDeployment).toMatch(/Never place an Authentik client secret, JWT/i);
   });
 
-  it("links a field-ordered operator guide without inventing unsupported installers", () => {
+  it("uses the requested field-ordered operator-guide hierarchy", () => {
     expect(readme).toContain("docs/operator-setup.md");
-    for (const heading of [
-      "## 2. Installation",
-      "### Package managers",
-      "### Container image and Compose: Docker or Podman",
-      "### Pods: Kubernetes or Podman",
-      "### Direct Docker or Podman run",
-      "## 4. Reverse proxy",
-      "## 5. Authorization",
-      "## 6. Agent integrations",
+    const requestedOutline = [
+      "## Installation",
+      "### Container",
+      "#### Compose",
+      "##### Docker",
+      "##### Podman",
+      "#### Pods",
+      "##### Kubernetes",
+      "##### Podman",
+      "#### Direct",
+      "##### Docker",
+      "##### Podman",
+      "### Package Manager",
+      "#### Choco",
+      "#### Homebrew",
+      "#### apt",
+      "#### dnf",
+      "#### apk",
+      "## Integration",
+      "### Reverse Proxy",
+      "#### nginx",
+      "#### NPM",
+      "#### haproxy",
+      "#### caddy",
+      "### Authorization",
+      "#### Authentik et al",
+      "### Agent",
+      "#### ChatGPT",
+      "#### Codex",
+      "#### Claude",
+      "#### Cursor",
+      "#### Copilot",
+      "#### et al",
+    ];
+    const headings = operatorSetup.match(/^#{2,5} .+$/gm) ?? [];
+
+    expect(headings.slice(0, requestedOutline.length)).toEqual(requestedOutline);
+    expect(headings[requestedOutline.length]).toBe("## Validation and rollback");
+  });
+
+  it("documents defaults, values, sources, and order without inventing installers", () => {
+    for (const fieldTable of [
+      /\|\s+Field\s+\|\s+Default \/ leave\s+\|\s+Set\s+\|\s+Value source\s+\|/,
+      /\|\s+NPM field\s+\|\s+`\/mcp` and `\/\.well-known\/oauth-protected-resource\/mcp`\s+\|\s+Source\s+\|/,
+      /\|\s+Field\s+\|\s+Set\s+\|\s+Value source\s+\|/,
     ]) {
-      expect(operatorSetup).toContain(heading);
+      expect(operatorSetup).toMatch(fieldTable);
     }
-    expect(operatorSetup).toContain("Do not invent package-manager commands.");
+    expect(operatorSetup).toContain("**Provision order:**");
+    expect(operatorSetup).toContain("no project-specific OS package");
     expect(operatorSetup).toContain(
-      "No Kubernetes manifest, Helm chart, Kustomize overlay",
+      "no Kubernetes manifest, Helm chart, Kustomize overlay",
     );
     expect(operatorSetup).toMatch(
-      /never needs a NetBox token, OAuth client secret, JWT/i,
+      /Never place a NetBox\s+token, OAuth client secret, JWT/i,
     );
   });
 
