@@ -382,7 +382,9 @@ Expected result: JSON with exact `issuer` and `jwks_uri` copied into the Prepara
 
 For a client that requires RFC 8414 authorization-server metadata even though Authentik OIDC
 discovery advertises `S256`, Authentik must be `>=2025.8`; see
-[OAuth metadata compatibility prerequisite](oauth-metadata-compatibility.md). ChatGPT client
+[OAuth metadata compatibility prerequisite](oauth-metadata-compatibility.md). Configure the
+provider Client-ID audience and required `mcp` scope exactly as described in
+[Authentik audience and scope configuration](authentik-audience-scope.md). ChatGPT client
 registration remains a separate unproven end-to-end gate.
 
 ### Agent

@@ -16,6 +16,7 @@ const oauthMetadataBridgeDesign = readFileSync(
   "docs/oauth-metadata-bridge-design.md",
   "utf8",
 );
+const authentikAudienceScope = readFileSync("docs/authentik-audience-scope.md", "utf8");
 const ci = readFileSync(".github/workflows/ci.yml", "utf8");
 
 describe("production container deployment", () => {
@@ -206,6 +207,22 @@ describe("production container deployment", () => {
     }
     expect(oauthMetadataBridgeDesign).toContain("Do not implement this bridge.");
     expect(oauthMetadataBridgeDesign).toContain("Authentik `>=2025.8`");
+  });
+
+  it("documents Authentik Client-ID audience and requested mcp scope", () => {
+    expect(operatorSetup).toContain("authentik-audience-scope.md");
+    for (const detail of [
+      "NETBOX_OIDC_AUDIENCE=<Client ID shown by the NetBox MCP OAuth2 provider>",
+      "Customization** → **Property Mappings** → **Create",
+      "Scope name | `mcp`",
+      "return {}",
+      "Applications** → **Providers",
+      "scope=openid mcp",
+      "read -rs ACCESS_TOKEN",
+    ]) {
+      expect(authentikAudienceScope).toContain(detail);
+    }
+    expect(authentikAudienceScope).toContain("does not write the token");
   });
 
   it("runs container build and Compose configuration gates in CI", () => {
