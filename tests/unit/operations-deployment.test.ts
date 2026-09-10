@@ -101,6 +101,41 @@ describe("production container deployment", () => {
     expect(operatorSetup).not.toMatch(/\bet al\b/i);
   });
 
+  it("separates preflight inputs from outputs produced by later steps", () => {
+    const preflightStart = operatorSetup.indexOf("## Preflight");
+    const outputsStart = operatorSetup.indexOf("## Outputs produced later");
+    const installationStart = operatorSetup.indexOf("## Installation");
+    const preflight = operatorSetup.slice(preflightStart, outputsStart);
+    const outputs = operatorSetup.slice(outputsStart, installationStart);
+
+    expect(preflightStart).toBeGreaterThanOrEqual(0);
+    expect(outputsStart).toBeGreaterThan(preflightStart);
+    expect(installationStart).toBeGreaterThan(outputsStart);
+    expect(preflight).not.toContain("<ISSUER>");
+    expect(preflight).not.toContain("<JWKS_URI>");
+    expect(preflight).not.toContain("<AUDIENCE>");
+    expect(preflight).not.toContain("<SCOPE>");
+    expect(outputs).toMatch(
+      /\|\s+Output\s+\|\s+Producer section\/step\s+\|\s+Validation\s+\|/,
+    );
+    for (const heading of [
+      "## Installation",
+      "### Container",
+      "### Package Manager",
+      "## Integration",
+      "### Reverse Proxy",
+      "### Authorization",
+      "### Agent",
+    ]) {
+      const start = operatorSetup.indexOf(heading);
+      const next = operatorSetup.indexOf("\n#", start + heading.length);
+      const section = operatorSetup.slice(start, next === -1 ? undefined : next);
+
+      expect(section).toContain("**Prerequisites:**");
+      expect(section).toContain("Stop");
+    }
+  });
+
   it("uses numbered procedures and default/value/source tables without invented artifacts", () => {
     for (const fieldTable of [
       /\|\s+Compose field\s+\|\s+Leave default\s+\|\s+Change to\s+\|\s+Source\s+\|/,

@@ -1,25 +1,34 @@
 # Operator setup: concrete procedures
 
-This guide changes **no** live system. Replace every `<PLACEHOLDER>` from the preparation
-table; never put a NetBox token, OAuth client secret, JWT, refresh token, or signing key in
-this repository, a shell profile, NPM, or a ticket.
+This guide changes **no** live system. Replace only values in **Preflight** or **Outputs
+produced later**; never put a NetBox token, OAuth client secret, JWT, refresh token, or signing
+key in this repository, a shell profile, NPM, or a ticket.
 
-## Preparation
+## Preflight
 
-Collect in this order before clicking or running anything:
+Complete these before any step below. They are inputs, not products of this guide.
 
-| Placeholder                        | Entered value                                         | Source                         |
-| ---------------------------------- | ----------------------------------------------------- | ------------------------------ |
-| `<NETBOX_URL>`                     | `https://<netbox-host>` (no `/api`)                   | NetBox operator                |
-| `<TOKEN_FILE>`                     | managed host secret-file path                         | secret manager                 |
-| `<PRIVATE_HOST>`, `<PRIVATE_PORT>` | gateway's private DNS name and Compose-published port | deployment/network operator    |
-| `<PUBLIC_MCP_HOST>`                | public DNS name                                       | DNS/TLS operator               |
-| `<RESOURCE_URL>`                   | `https://<PUBLIC_MCP_HOST>/mcp`                       | public DNS/TLS design          |
-| `<ISSUER>`, `<JWKS_URI>`           | exact `issuer`, `jwks_uri` in discovery               | authorization-server discovery |
-| `<AUDIENCE>`, `<SCOPE>`            | MCP-only audience and required scope                  | provider claim/scope policy    |
-| `<NPX>`                            | absolute `npx`/`npx.cmd` path                         | `command -v npx` / `where npx` |
+| Required artifact/access                         | Source              | Validation                                                                                         | Stop condition           |
+| ------------------------------------------------ | ------------------- | -------------------------------------------------------------------------------------------------- | ------------------------ |
+| Source checkout                                  | repository clone    | `test -f compose.yaml` exits `0`                                                                   | file absent: stop        |
+| `<NETBOX_URL>`                                   | NetBox operator     | `curl -sS -o /dev/null -w '%{http_code}' "$NETBOX_URL/api/status/"` returns `200`, `401`, or `403` | another result: stop     |
+| `<TOKEN_FILE>`                                   | secret manager      | `test -r "$TOKEN_FILE"` exits `0`; do not print it                                                 | unreadable/missing: stop |
+| NetBox, Authentik, proxy, and agent admin access | respective operator | operator can open required admin UI                                                                | access absent: stop      |
+| DNS/TLS and private-network change authority     | network operator    | operator confirms scope                                                                            | authority absent: stop   |
 
-Gateway HTTP values are exactly:
+## Outputs produced later
+
+Do not collect these before their producer step succeeds.
+
+| Output                                | Producer section/step      | Validation                                                                        |
+| ------------------------------------- | -------------------------- | --------------------------------------------------------------------------------- |
+| `<NPX>`                               | Package Manager step 2     | `command -v npx`/`where npx` returns an absolute path                             |
+| `<PRIVATE_HOST>`, `<PRIVATE_PORT>`    | Compose deployment overlay | `curl -fsS http://<PRIVATE_HOST>:<PRIVATE_PORT>/healthz` prints `{"status":"ok"}` |
+| `<PUBLIC_MCP_HOST>`, `<RESOURCE_URL>` | Reverse Proxy step 1       | public certificate is valid and metadata URL resolves                             |
+| `<AUDIENCE>`, `<SCOPE>`               | Authentik step 5           | provider scope/claim mapping shows both values                                    |
+| `<ISSUER>`, `<JWKS_URI>`              | Authentik step 7           | discovery JSON contains exact values                                              |
+
+After their producer steps, gateway HTTP values are exactly:
 
 ```text
 NETBOX_URL=<NETBOX_URL>
@@ -38,9 +47,13 @@ forwards it to NetBox.
 
 ## Installation
 
+**Prerequisites:** Preflight source checkout and the required runtime/package-manager access.
+Stop if `test -f compose.yaml` exits nonzero or the chosen runtime cannot be installed.
+
 ### Container
 
-**Prerequisites:** a managed token file, Docker or Podman, and values above. **Do not** add
+**Prerequisites:** Preflight source checkout, `<NETBOX_URL>`, `<TOKEN_FILE>`, Docker or Podman,
+and network-change authority. Stop if any is missing. **Do not** add
 `NETBOX_HTTP_HOST` or `NETBOX_HTTP_PORT`: Compose owns listener/port mapping.
 
 #### Compose
@@ -49,7 +62,8 @@ forwards it to NetBox.
    not modify `compose.yaml` to embed a secret.
 2. Set its secret **source** to `<TOKEN_FILE>`; leave service-side
    `NETBOX_TOKEN_FILE=/run/secrets/netbox_token` unchanged.
-3. Set exactly the preparation-table HTTP values in the service environment. Leave the
+3. Set exactly the **Outputs produced later** HTTP values in the service environment; stop until
+   every output row has passed its validation. Leave the
    supplied image build, non-root user, read-only filesystem, dropped capabilities, and base
    `ports:` setting unchanged.
 4. Run `docker compose --profile deployment config`; expected result: exit `0`, the rendered
@@ -142,8 +156,8 @@ Do not fabricate one from this guide.
 2. Set non-root identity, read-only root filesystem, dropped capabilities, bounded tmp/cache,
    a managed secret mounted at `/run/secrets/netbox_token`, and a NetworkPolicy allowing only
    the proxy to the private port.
-3. Set exactly the preparation values as workload environment variables; keep health endpoints
-   private.
+3. Set exactly the **Outputs produced later** values as workload environment variables; stop
+   until every output row has passed its validation; keep health endpoints private.
 4. Apply the operator-owned manifest. Expected result: its controller reports available
    replicas and `GET /healthz` returns `200 {"status":"ok"}` through the private Service.
    Roll back to the cluster operator's previous revision if either result differs.
@@ -156,7 +170,8 @@ cluster operator.
 
 1. Have the runtime operator create an approved pod definition with equivalent security,
    secret mount, and private networking.
-2. Mount the token at `/run/secrets/netbox_token` and set the Preparation values.
+2. Mount the token at `/run/secrets/netbox_token` and set the **Outputs produced later** values
+   after every output validation passes.
 3. Require `GET /healthz` on the private endpoint to return `200 {"status":"ok"}` before
    testing metadata/401; remove the pod and restore the previous runtime definition if it does
    not.
@@ -193,6 +208,9 @@ filesystem, network restriction, or restart policy. Use Compose.
 **Defaults:** none. **Status:** manual/unsupported.
 
 ### Package Manager
+
+**Prerequisites:** Preflight source checkout and access to the named package manager. Stop if
+`package.json` is absent or Node.js cannot meet `>=20.11`.
 
 The project ships only an npm package, `@zenixsolutions/netbox-mcp`. It ships no Chocolatey,
 Homebrew, apt, dnf, or apk package. Each distinct procedure below installs a compatible Node
@@ -244,7 +262,13 @@ runtime only; then run `<NPX> -y @zenixsolutions/netbox-mcp --version`.
 
 ## Integration
 
+**Prerequisites:** Preflight administrator and network-change access. Stop until gateway HTTP
+outputs, listed above, have passed validation.
+
 ### Reverse Proxy
+
+**Prerequisites:** `<PRIVATE_HOST>`, `<PRIVATE_PORT>`, `<PUBLIC_MCP_HOST>`, and
+`<RESOURCE_URL>` from validated Outputs. Stop if any is absent.
 
 1. Choose `<RESOURCE_URL>` and obtain a public TLS certificate first.
 2. Route **both** `/mcp` and `/.well-known/oauth-protected-resource/mcp` to the private
@@ -309,6 +333,9 @@ site defaults unchanged. **Fields/source/status:** same as nginx, using Caddy do
 
 ### Authorization
 
+**Prerequisites:** Preflight Authentik administrator access and `<PUBLIC_MCP_HOST>` output.
+Stop if either is absent.
+
 #### Authentik
 
 This is an MCP-specific application/provider; do **not** reuse the NetBox UI client. The
@@ -354,6 +381,9 @@ Expected result: JSON with exact `issuer` and `jwks_uri` copied into the Prepara
 | Resource URL          | `<RESOURCE_URL>`            | exact public HTTPS `/mcp`     | DNS/TLS design       |
 
 ### Agent
+
+**Prerequisites:** agent administrator/UI access. Local stdio paths also require validated
+`<NPX>`; remote paths require validated `<RESOURCE_URL>`. Stop if the required path is absent.
 
 All local stdio configurations use this server command and environment:
 
