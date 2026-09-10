@@ -352,9 +352,9 @@ reference procedure it follows is Authentik's NetBox integration:
 4. Configure Authorization Code with PKCE/S256 for public/native agent clients; disable the
    implicit grant. Use explicit consent for third-party/user-facing clients unless a documented
    first-party policy approves implicit consent.
-5. Create/attach an MCP-only scope `<SCOPE>` and claim mapping emitting audience `<AUDIENCE>`;
-   restrict application/provider bindings to approved users/groups. Values come from
-   authorization policy, not this document.
+5. Follow [Authentik audience and scope configuration](authentik-audience-scope.md): create
+   the `mcp` mapping, attach it to the provider, bind approved users/groups, and set
+   `<AUDIENCE>` to the provider's displayed Client ID. Do not add a claim mapping for `aud`.
 6. Add only exact redirect URIs supplied by each agent's current UI/docs. Do not use the
    NetBox redirect URI (`/oauth/complete/oidc/`), which belongs to NetBox UI SSO, not MCP.
 7. Click **Submit**. Open

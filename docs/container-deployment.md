@@ -126,11 +126,12 @@ In **Applications → Applications → Create**, use these values:
 | Signing             | RS256 or ES256 JWS; do not enable JWE encryption.                                                                                                   | The gateway accepts RS256/ES256 signed JWTs, not encrypted JWTs.       |
 | Access policy       | Bind only intended groups/users.                                                                                                                    | NetBox MCP may expose infrastructure data and writes.                  |
 
-Create a provider scope mapping named `mcp`, attach it to this provider, and
-require clients to request it. Configure the provider's access-token audience
-claim/claim mapping to emit exactly `netbox-mcp` (or choose another stable,
-MCP-only value and use it consistently below). The audience and scope belong to
-the **MCP provider**, not the NetBox application or NPM.
+Create the provider scope mapping and binding exactly as described in
+[`docs/authentik-audience-scope.md`](authentik-audience-scope.md), attach it to this provider,
+and require clients to request `mcp`. For normal Authentik OAuth tokens, set
+`NETBOX_OIDC_AUDIENCE` to this provider's displayed **Client ID**; do not use a claim mapping
+to emit `netbox-mcp` or overwrite `aud`. The audience and scope belong to the **MCP provider**,
+not the NetBox application or NPM.
 
 Add only connector-supplied, exact redirect URIs to the provider. Do not use
 wildcards. If a connector requires client registration or a redirect URI not yet

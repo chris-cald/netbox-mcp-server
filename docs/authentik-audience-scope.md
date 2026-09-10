@@ -26,11 +26,11 @@ Stop if either is absent.
 1. **Customization** → **Property Mappings** → **Create** → **OAuth2 Scope Mapping**.
 2. Change only these fields; leave all other fields at their UI defaults:
 
-   | Field | Value | Source |
-   | --- | --- | --- |
-   | Name | `NetBox MCP scope` | local naming |
-   | Scope name | `mcp` | gateway required scope |
-   | Expression | `return {}` | avoid overwriting reserved claims |
+   | Field      | Value              | Source                            |
+   | ---------- | ------------------ | --------------------------------- |
+   | Name       | `NetBox MCP scope` | local naming                      |
+   | Scope name | `mcp`              | gateway required scope            |
+   | Expression | `return {}`        | avoid overwriting reserved claims |
 
    ```python
    return {}

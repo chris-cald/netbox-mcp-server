@@ -381,7 +381,7 @@ Write `npx -y @zenixsolutions/netbox-mcp` where the table says `netbox-mcp`, or
 | ------------------------- | ----------------------------------------------------------------------------------------- | ------------------------------- |
 | `netbox-mcp --help`       | Prints usage and every environment variable the server reads. Reads no configuration.     | 0                               |
 | `netbox-mcp --version`    | Prints the version. Verified: `0.2.0`.                                                    | 0                               |
-| `netbox-mcp --check`      | Validates configuration; names the first missing or invalid variable. Contacts nothing.   | **0** usable, **78** not usable |
+| `netbox-mcp --check`      | Validates configuration; with HTTP discovery configured it may fetch the discovery URL.   | **0** usable, **78** not usable |
 | `netbox-mcp --list-tools` | Prints the 6 tool names to stdout, `6 tools registered.` to stderr. Needs no credentials. | 0                               |
 
 Any other argument, or no argument at all, starts the configured transport: stdio by
@@ -415,8 +415,9 @@ Optional environment variables:
                       connection. Prefer installing your internal root CA.
   NETBOX_TRANSPORT    stdio (default) or http.
   NETBOX_HTTP_ALLOWED_HOSTS Required for HTTP: comma-separated published Host values.
-  NETBOX_OIDC_ISSUER  Required for HTTP: canonical HTTPS issuer.
-  NETBOX_OIDC_JWKS_URL Required for HTTP: canonical HTTPS JWKS URL.
+  NETBOX_OIDC_DISCOVERY_URL Optional HTTPS OIDC discovery URL; derives issuer and JWKS URL.
+  NETBOX_OIDC_ISSUER  Required for HTTP without discovery: canonical HTTPS issuer.
+  NETBOX_OIDC_JWKS_URL Required for HTTP without discovery: canonical HTTPS JWKS URL.
   NETBOX_OIDC_AUDIENCE Required for HTTP: exact access-token audience.
   NETBOX_OIDC_REQUIRED_SCOPE Required for HTTP: exact access-token scope.
   NETBOX_OIDC_RESOURCE_URL Required for HTTP: canonical HTTPS /mcp resource URL.

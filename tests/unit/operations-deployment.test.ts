@@ -212,7 +212,7 @@ describe("production container deployment", () => {
   it("documents Authentik Client-ID audience and requested mcp scope", () => {
     expect(operatorSetup).toContain("authentik-audience-scope.md");
     for (const detail of [
-      "NETBOX_OIDC_AUDIENCE=<Client ID shown by the NetBox MCP OAuth2 provider>",
+      "NETBOX_OIDC_AUDIENCE=<copied provider Client ID>",
       "Customization** → **Property Mappings** → **Create",
       "Scope name | `mcp`",
       "return {}",
@@ -222,7 +222,7 @@ describe("production container deployment", () => {
     ]) {
       expect(authentikAudienceScope).toContain(detail);
     }
-    expect(authentikAudienceScope).toContain("does not write the token");
+    expect(authentikAudienceScope).toContain("prints only claims—not the token");
   });
 
   it("runs container build and Compose configuration gates in CI", () => {

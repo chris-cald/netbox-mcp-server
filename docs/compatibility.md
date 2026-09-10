@@ -184,7 +184,7 @@ search will attempt that endpoint on an instance without the plugin.
 ## Known limitations
 
 - **Stock available-IPs allocation E2E is blocked on unpatched NetBox 4.6.7.** See the patched local fixture note above; gateway response validation is intentionally not relaxed.
-- **No OIDC discovery or proxy integration.** The listener does not trust forwarded headers, cookies, or CORS. Operators who publish HTTP must supply TLS, OIDC, firewall or network policy, and explicit allowed hosts.
+- **OIDC discovery is optional, not a proxy integration.** `NETBOX_OIDC_DISCOVERY_URL` derives issuer and JWKS only; discovery uses a five-second HTTPS fetch with redirects refused. A failure falls back only to a complete valid manual issuer/JWKS pair and otherwise fails closed. The listener does not trust forwarded headers, cookies, or CORS. Operators who publish HTTP must supply TLS, OIDC, firewall or network policy, and explicit allowed hosts.
 - **A write costs several calls.** The layered design trades round-trips for
   context. Measured against a live instance: a trivial read is 1 call, and
   creating a device with three prerequisites is 6, five of them before the
