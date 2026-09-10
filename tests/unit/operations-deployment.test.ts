@@ -12,6 +12,10 @@ const oauthMetadataCompatibility = readFileSync(
   "docs/oauth-metadata-compatibility.md",
   "utf8",
 );
+const oauthMetadataBridgeDesign = readFileSync(
+  "docs/oauth-metadata-bridge-design.md",
+  "utf8",
+);
 const ci = readFileSync(".github/workflows/ci.yml", "utf8");
 
 describe("production container deployment", () => {
@@ -199,6 +203,18 @@ describe("production container deployment", () => {
     expect(oauthMetadataCompatibility).toContain(
       "OpenTofu is desired-state automation, not a protocol fix.",
     );
+    expect(oauthMetadataCompatibility).toContain("oauth-metadata-bridge-design.md");
+    for (const detail of [
+      "proxy_pass_request_body off;",
+      'proxy_set_header Authorization "";',
+      'proxy_set_header Cookie "";',
+      "code_challenge_methods_supported",
+      "Dynamic Client Registration (DCR)",
+      "OpenTofu desired state",
+      "curl -iS https://auth.calan.co/.well-known/oauth-authorization-server/application/o/netbox",
+    ]) {
+      expect(oauthMetadataBridgeDesign).toContain(detail);
+    }
   });
 
   it("runs container build and Compose configuration gates in CI", () => {

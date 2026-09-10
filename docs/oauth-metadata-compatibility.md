@@ -102,4 +102,5 @@ provider/application, scope mapping, NPM route, bridge service, and verification
 reviewed provider/module and explicit authorization exist. It cannot make Authentik emit RFC
 8414 metadata by itself. Keep bridge JSON public-only and obtain all secret values from the
 secret manager at apply time; do not put them in Terraform/OpenTofu variables, state, plans, or
-this repository.
+this repository. For the reviewed static-container, NPM, method, cache, CORS, verification,
+and rollback design, see [OAuth authorization-server metadata bridge design](oauth-metadata-bridge-design.md).
