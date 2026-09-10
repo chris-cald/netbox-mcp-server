@@ -173,13 +173,29 @@ provider, scope, signing key, or the gateway to roll back the bridge.
 
 ## ChatGPT compatibility boundary
 
-This bridge addresses only an RFC 8414 metadata-discovery requirement and PKCE advertisement.
-It does **not** create Dynamic Client Registration (DCR). If ChatGPT requires
-`registration_endpoint`, an Authentik-compatible DCR endpoint, particular redirect URI
-registration, consent behavior, token endpoint authentication, or a grant not already offered
-by Authentik, stop: the bridge must not advertise or emulate it. Confirm that requirement from
-ChatGPT's current UI/error or authoritative OpenAI documentation, then decide whether
-Authentik can provide it or whether a different authorization server is required.
+**Status: blocked; this bridge is not ChatGPT-ready.** RFC 8414 metadata plus `S256` alone does
+not establish compatibility. OpenAI's OAuth documentation describes ChatGPT support for PKCE,
+predefined OAuth clients, Dynamic Client Registration (DCR), and Client ID Metadata Documents
+(CIMD); its authorization-server metadata example includes both
+`client_id_metadata_document_supported` and `registration_endpoint`; see
+[OpenAI authentication guidance](https://developers.openai.com/plugins/build/auth).
+
+The static bridge must not add either member unless the live authorization server actually
+implements the corresponding behavior. It does **not** create DCR, CIMD processing, client
+registration, redirect-URI validation, consent behavior, or token endpoint authentication.
+Authentik compatibility is unconfirmed for all three ChatGPT client-registration paths:
+
+| ChatGPT path      | Authentik status | Required proof before advertising it                                                                                  |
+| ----------------- | ---------------- | --------------------------------------------------------------------------------------------------------------------- |
+| CIMD              | unconfirmed      | Authentik accepts and validates a Client ID Metadata Document URL as `client_id`                                      |
+| DCR               | unconfirmed      | Authentik publishes a working `registration_endpoint` and ChatGPT registers a client                                  |
+| Predefined client | unconfirmed      | ChatGPT UI supplies a stable client ID and exact redirect URI; Authentik accepts both and full authorization succeeds |
+
+Do not advertise `registration_endpoint` or `client_id_metadata_document_supported` in bridge
+JSON. Confirm the selected path from current OpenAI documentation and perform an end-to-end
+ChatGPT authorization, callback, token exchange, and MCP `initialize` test before describing
+this integration as supported. If Authentik cannot meet the selected path, use an authorization
+server that can; the bridge is not a substitute.
 
 ## OpenTofu desired state
 

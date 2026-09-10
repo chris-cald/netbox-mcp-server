@@ -91,9 +91,10 @@ curl -fsS https://auth.calan.co/.well-known/oauth-authorization-server/applicati
 ```
 
 Expected result: JSON with the exact issuer and
-`"code_challenge_methods_supported":["S256"]`. Confirm it contains no secret values. Then
-retry ChatGPT connector creation. Roll back by deleting only the bridge route/service; the
-existing Authentik OIDC discovery endpoint remains unchanged.
+`"code_challenge_methods_supported":["S256"]`. Confirm it contains no secret values. Do not
+claim ChatGPT compatibility or retry production registration until CIMD, DCR, or predefined
+client requirements are separately proven end to end. Roll back by deleting only the bridge
+route/service; the existing Authentik OIDC discovery endpoint remains unchanged.
 
 ## OpenTofu
 

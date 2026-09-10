@@ -210,6 +210,9 @@ describe("production container deployment", () => {
       'proxy_set_header Cookie "";',
       "code_challenge_methods_supported",
       "Dynamic Client Registration (DCR)",
+      "Client ID Metadata Documents",
+      "Status: blocked; this bridge is not ChatGPT-ready.",
+      "Do not advertise `registration_endpoint`",
       "OpenTofu desired state",
       "curl -iS https://auth.calan.co/.well-known/oauth-authorization-server/application/o/netbox",
     ]) {
