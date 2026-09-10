@@ -8,6 +8,10 @@ const dockerignore = readFileSync(".dockerignore", "utf8");
 const readme = readFileSync("README.md", "utf8");
 const containerDeployment = readFileSync("docs/container-deployment.md", "utf8");
 const operatorSetup = readFileSync("docs/operator-setup.md", "utf8");
+const oauthMetadataCompatibility = readFileSync(
+  "docs/oauth-metadata-compatibility.md",
+  "utf8",
+);
 const ci = readFileSync(".github/workflows/ci.yml", "utf8");
 
 describe("production container deployment", () => {
@@ -180,6 +184,21 @@ describe("production container deployment", () => {
       expect(start).toBeGreaterThanOrEqual(0);
       expect(section).toMatch(/```(?:sh|json|nginx|text)\n/);
     }
+  });
+
+  it("documents an RFC 8414 bridge without treating OpenTofu as a protocol fix", () => {
+    expect(operatorSetup).toContain("oauth-metadata-compatibility.md");
+    expect(oauthMetadataCompatibility).toContain("RFC 9728");
+    expect(oauthMetadataCompatibility).toContain("RFC 8414 section 3.1");
+    expect(oauthMetadataCompatibility).toContain(
+      "/.well-known/oauth-authorization-server/application/o/netbox",
+    );
+    expect(oauthMetadataCompatibility).toContain(
+      '"code_challenge_methods_supported": ["S256"]',
+    );
+    expect(oauthMetadataCompatibility).toContain(
+      "OpenTofu is desired-state automation, not a protocol fix.",
+    );
   });
 
   it("runs container build and Compose configuration gates in CI", () => {

@@ -380,6 +380,11 @@ Expected result: JSON with exact `issuer` and `jwks_uri` copied into the Prepara
 | Discovery fields      | `<ISSUER>` / `<JWKS_URI>`   | copy exactly                  | discovery document   |
 | Resource URL          | `<RESOURCE_URL>`            | exact public HTTPS `/mcp`     | DNS/TLS design       |
 
+For a client that requires RFC 8414 authorization-server metadata even though Authentik OIDC
+discovery advertises `S256`, use the standards-backed, metadata-only bridge described in
+[OAuth metadata compatibility bridge](oauth-metadata-compatibility.md). Do not deploy it until
+a separate authorization covers the Authentik-host proxy route.
+
 ### Agent
 
 **Prerequisites:** agent administrator/UI access. Local stdio paths also require validated
