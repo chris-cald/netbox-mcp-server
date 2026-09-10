@@ -117,6 +117,34 @@ describe("production container deployment", () => {
     expect(operatorSetup).toMatch(
       /never put a NetBox\s+token, OAuth client secret, JWT/i,
     );
+    for (const forbiddenPlaceholder of [
+      "documented equivalent",
+      "verify privately",
+      "as appropriate",
+      "etc.",
+      "inspect it",
+    ]) {
+      expect(operatorSetup.toLowerCase()).not.toContain(forbiddenPlaceholder);
+    }
+    expect(operatorSetup).toContain("podman compose --profile deployment config");
+    expect(operatorSetup).toContain("podman compose --profile deployment up -d");
+    expect(operatorSetup).toContain("podman compose --profile deployment ps");
+    expect(operatorSetup).toContain("podman compose --profile deployment down");
+    expect(operatorSetup).toContain('{"status":"ok"}');
+    for (const heading of [
+      "##### Docker",
+      "##### Podman",
+      "#### NPM",
+      "#### Authentik",
+      "### Agent",
+    ]) {
+      const start = operatorSetup.indexOf(heading);
+      const next = operatorSetup.indexOf("\n####", start + heading.length);
+      const section = operatorSetup.slice(start, next === -1 ? undefined : next);
+
+      expect(start).toBeGreaterThanOrEqual(0);
+      expect(section).toMatch(/```(?:sh|json|nginx|text)\n/);
+    }
   });
 
   it("runs container build and Compose configuration gates in CI", () => {

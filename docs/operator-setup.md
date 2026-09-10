@@ -52,10 +52,12 @@ forwards it to NetBox.
 3. Set exactly the preparation-table HTTP values in the service environment. Leave the
    supplied image build, non-root user, read-only filesystem, dropped capabilities, and base
    `ports:` setting unchanged.
-4. Render first, then start privately; confirm the rendered output contains the secret path,
-   never its contents.
-5. Roll back by stopping the new container and restoring the prior override/image; remove a
-   public proxy route before reopening an old deployment.
+4. Run `docker compose --profile deployment config`; expected result: exit `0`, the rendered
+   service contains `/run/secrets/netbox_token`, and it contains no token value.
+5. Run `docker compose --profile deployment up -d`, then
+   `curl -fsS http://<PRIVATE_HOST>:<PRIVATE_PORT>/healthz`; expected JSON is
+   `{"status":"ok"}`. Roll back with `docker compose --profile deployment down` before
+   restoring the prior override/image.
 
 | Compose field               | Leave default                          | Change to                                    | Source                 |
 | --------------------------- | -------------------------------------- | -------------------------------------------- | ---------------------- |
@@ -67,25 +69,67 @@ forwards it to NetBox.
 
 ##### Docker
 
-1. Verify `docker compose version` and `docker version`; use the project Compose profile.
-2. Run `docker compose --profile deployment config` and inspect it for the expected secret
-   **path** and values, never a secret value.
-3. Run `docker compose --profile deployment up -d`; verify private health endpoints.
-4. Stop with `docker compose --profile deployment down` for rollback.
+1. Run:
+
+   ```sh
+   docker compose version
+   docker version
+   docker compose --profile deployment config
+   ```
+
+   Expected result: every command exits `0`; `config` contains a
+   `/run/secrets/netbox_token` mount and no token value.
+
+2. Run:
+
+   ```sh
+   docker compose --profile deployment up -d
+   curl -fsS http://<PRIVATE_HOST>:<PRIVATE_PORT>/healthz
+   ```
+
+   Expected JSON is `{"status":"ok"}`.
+
+3. Roll back with:
+
+   ```sh
+   docker compose --profile deployment down
+   ```
 
 **Defaults/fields:** use the Compose table; no Docker-only image, port, or `docker run`
 command is supported.
 
 ##### Podman
 
-1. Verify the installed Compose-compatible Podman implementation renders the same profile.
-2. Run its documented Compose equivalent of `config`; verify non-root, read-only, secret-path,
-   and private-network semantics match Docker output.
-3. Start it with that implementation's documented Compose command; verify privately.
-4. Stop via the same implementation for rollback.
+1. Run:
 
-**Defaults/fields:** use the Compose table. This is a manual compatibility path: no separate
-Podman Compose file is shipped.
+   ```sh
+   podman compose version
+   podman compose --profile deployment config
+   ```
+
+   Expected result: both exit `0` and `config` output contains
+   `/run/secrets/netbox_token`. If either exits nonzero or the mount is absent, stop: this
+   runtime is unsupported for the shipped Compose profile.
+
+2. Run:
+
+   ```sh
+   podman compose --profile deployment up -d
+   podman compose --profile deployment ps
+   curl -fsS http://<PRIVATE_HOST>:<PRIVATE_PORT>/healthz
+   ```
+
+   Expected result: `ps` shows the gateway service `running`; curl prints
+   `{"status":"ok"}`.
+
+3. Roll back with:
+
+   ```sh
+   podman compose --profile deployment down
+   ```
+
+**Defaults/fields:** use the Compose table. This is a supported command path only when steps
+1–3 succeed; no separate Podman Compose file is shipped.
 
 #### Pods
 
@@ -100,8 +144,9 @@ Do not fabricate one from this guide.
    the proxy to the private port.
 3. Set exactly the preparation values as workload environment variables; keep health endpoints
    private.
-4. Apply the operator-owned manifest, verify metadata and 401 privately, then roll back with
-   the cluster operator's prior revision.
+4. Apply the operator-owned manifest. Expected result: its controller reports available
+   replicas and `GET /healthz` returns `200 {"status":"ok"}` through the private Service.
+   Roll back to the cluster operator's previous revision if either result differs.
 
 **Defaults:** none. **Value sources:** cluster policy, secret manager, and Preparation.
 **Status:** manual/unsupported; the exact manifest must be supplied and reviewed by the
@@ -112,8 +157,9 @@ cluster operator.
 1. Have the runtime operator create an approved pod definition with equivalent security,
    secret mount, and private networking.
 2. Mount the token at `/run/secrets/netbox_token` and set the Preparation values.
-3. Validate health, metadata, and 401 privately; remove the pod and restore the previous
-   runtime definition on rollback.
+3. Require `GET /healthz` on the private endpoint to return `200 {"status":"ok"}` before
+   testing metadata/401; remove the pod and restore the previous runtime definition if it does
+   not.
 
 **Defaults:** none. **Status:** manual/unsupported; no `podman pod` command is provided.
 
@@ -129,7 +175,8 @@ filesystem, network restriction, or restart policy. Use Compose.
 1. Do not use a command copied from this document; prepare it locally from Docker's reference.
 2. Require non-root/read-only, managed token mount at the service path, Preparation fields,
    and no unauthenticated published port.
-3. Validate privately; stop/remove it and restore the previous runtime definition to roll back.
+3. Require `GET /healthz` on the private endpoint to return `200 {"status":"ok"}`; otherwise
+   stop/remove it and restore the previous runtime definition.
 
 **Defaults:** none. **Status:** manual/unsupported.
 
@@ -140,7 +187,8 @@ filesystem, network restriction, or restart policy. Use Compose.
 1. Do not use a command copied from this document; prepare it locally from Podman's reference.
 2. Require non-root/read-only, managed token mount at the service path, Preparation fields,
    and no unauthenticated published port.
-3. Validate privately; stop/remove it and restore the previous runtime definition to roll back.
+3. Require `GET /healthz` on the private endpoint to return `200 {"status":"ok"}`; otherwise
+   stop/remove it and restore the previous runtime definition.
 
 **Defaults:** none. **Status:** manual/unsupported.
 
@@ -204,7 +252,9 @@ runtime only; then run `<NPX> -y @zenixsolutions/netbox-mcp --version`.
 3. Preserve public `Host` and caller `Authorization`; disable buffering for streaming.
 4. Allow only the proxy to reach `<PRIVATE_HOST>:<PRIVATE_PORT>`. Plain HTTP is allowed only
    on a co-hosted or isolated trusted path; otherwise use encrypted networking/TLS tunnel.
-5. Verify metadata and 401 before enabling an agent. Roll back by removing both proxy routes.
+5. Run the three `curl` commands in **Verification and rollback** before enabling an agent.
+   Expected results are the stated health JSON, metadata JSON, and `401` challenge. Roll back
+   by removing both proxy routes.
 
 #### nginx
 
@@ -287,6 +337,12 @@ reference procedure it follows is Authentik's NetBox integration:
    metadata, a 401 challenge, valid scoped token, and expired/wrong-audience/missing-scope
    rejection. Roll back by removing gateway public routes, then disabling bindings/provider.
 
+```sh
+curl -fsS https://<AUTHENTIK_HOST>/application/o/netbox-mcp/.well-known/openid-configuration
+```
+
+Expected result: JSON with exact `issuer` and `jwks_uri` copied into the Preparation table.
+
 | Authentik field       | Enter                       | Leave default / reason        | Source               |
 | --------------------- | --------------------------- | ----------------------------- | -------------------- |
 | Application name/slug | `NetBox MCP` / `netbox-mcp` | group/UI unchanged            | local naming policy  |
@@ -311,7 +367,9 @@ All local stdio configurations use this server command and environment:
 
 Use the actual client UI/path below. Do not commit token values. For remote OAuth, configure
 only `<RESOURCE_URL>` and exact client-provided registration data after the Authentik steps;
-never guess redirect URIs.
+never guess redirect URIs. In every agent's verification step, expected result is that the
+client lists exactly these six tools: `netbox_global_search`, `netbox_discover`,
+`netbox_describe`, `netbox_read`, `netbox_write`, and `netbox_invoke`.
 
 #### ChatGPT
 
@@ -319,7 +377,7 @@ never guess redirect URIs.
 web → Settings → Apps/Connectors → Developer mode (availability is account-controlled). 2.
 Add a remote MCP connector and enter `<RESOURCE_URL>`; leave authentication selection at the
 UI default until it offers OAuth. 3. Copy only the redirect/client registration data it shows
-into Authentik, save, reconnect, and verify tools. 4. Remove the connector to roll back.
+into Authentik, save, reconnect, and confirm the six tool names listed in **Agent** appear. 4. Remove the connector to roll back.
 **Status:** evidence-backed remote path; exact UI fields vary by account.
 
 #### Codex
@@ -334,7 +392,13 @@ into Authentik, save, reconnect, and verify tools. 4. Remove the connector to ro
 
 1. Open `~/Library/Application Support/Claude/claude_desktop_config.json`; back it up. 2. Under
    existing `mcpServers`, add `netbox` using the JSON template above. 3. Leave existing servers
-   unchanged, validate `python3 -m json.tool`, `chmod 600`, then fully quit/reopen Claude. 4. Verify tools; restore backup to roll back. **Status:** documented stdio.
+   unchanged, run the commands below, then fully quit/reopen Claude. 4. Confirm the six tool
+   names listed in **Agent** appear; restore backup to roll back.
+
+````sh
+python3 -m json.tool < "$HOME/Library/Application Support/Claude/claude_desktop_config.json" > /dev/null
+chmod 600 "$HOME/Library/Application Support/Claude/claude_desktop_config.json"
+``` **Status:** documented stdio.
 
 #### Claude Code
 
@@ -348,8 +412,8 @@ with Claude Code's documented command to roll back. **Status:** documented stdio
 
 **Evidence:** <https://cursor.com/docs/mcp>. 1. Open global `~/.cursor/mcp.json` or project
 `.cursor/mcp.json`; back it up. 2. Under `mcpServers`, add `netbox` from the JSON template. 3.
-Leave existing entries unchanged, save valid JSON, and restart Cursor. 4. Verify tools; remove
-only `netbox` to roll back. **Status:** documented stdio.
+Leave existing entries unchanged, save valid JSON, and restart Cursor. 4. Confirm the six tool
+names listed in **Agent** appear; remove only `netbox` to roll back. **Status:** documented stdio.
 
 #### GitHub Copilot
 
@@ -382,13 +446,13 @@ Local.
 
 **Evidence:** <https://docs.cline.bot/mcp/mcp-overview>. 1. In VS Code open Cline → MCP Servers
 → Configure → Configure MCP Servers. 2. Add a `mcpServers.netbox` stdio entry using template
-command/args/env. 3. Leave other entries unchanged; save/restart extension. 4. Verify/remove
-entry. **Status:** evidence-backed; use the extension-selected active config path.
+command/args/env. 3. Leave other entries unchanged; save/restart extension. 4. Confirm the
+six tool names listed in **Agent** appear; remove the entry to roll back. **Status:** evidence-backed; use the extension-selected active config path.
 
 #### Roo Code
 
 **Evidence:** <https://github.com/RooCodeInc/Roo-Code>. 1. Open Roo Code MCP settings and choose
-global `mcp_settings.json` or project `.roo/mcp.json`. 2. Add `mcpServers.netbox` from template. 3. Leave existing entries unchanged; save/restart extension. 4. Verify/remove entry. **Status:**
+global `mcp_settings.json` or project `.roo/mcp.json`. 2. Add `mcpServers.netbox` from template. 3. Leave existing entries unchanged; save/restart extension. 4. Confirm the six tool names listed in **Agent** appear; remove the entry to roll back. **Status:**
 configuration locations are evidence-backed from project source; UI behavior is version-specific.
 
 #### Continue
@@ -396,17 +460,21 @@ configuration locations are evidence-backed from project source; UI behavior is 
 **Evidence:** <https://docs.continue.dev/customize/deep-dives/mcp>. 1. Open Continue
 `config.yaml` or `.continue/mcpServers/`. 2. Add `netbox` as a stdio MCP server with `<NPX>`,
 args, and environment template. 3. Leave unrelated model/agent settings unchanged; reload
-Continue in Agent mode. 4. Verify/remove server. **Status:** documented stdio.
+Continue in Agent mode. 4. Confirm the six tool names listed in **Agent** appear; remove the
+server to roll back. **Status:** documented stdio.
 
 ## Verification and rollback
 
-1. Privately check `/healthz` and `/readyz`.
-2. Check `https://<PUBLIC_MCP_HOST>/.well-known/oauth-protected-resource/mcp` returns
-   `<RESOURCE_URL>` and `<ISSUER>`.
-3. Check missing bearer `POST <RESOURCE_URL>` returns `401` with
-   `WWW-Authenticate: Bearer resource_metadata=...`, never login HTML.
+1. Run `curl -fsS http://<PRIVATE_HOST>:<PRIVATE_PORT>/healthz` and
+   `curl -fsS http://<PRIVATE_HOST>:<PRIVATE_PORT>/readyz`; expected JSON is respectively
+   `{"status":"ok"}` and `{"status":"ready"}`.
+2. Run `curl -fsS https://<PUBLIC_MCP_HOST>/.well-known/oauth-protected-resource/mcp`;
+   expected JSON contains `<RESOURCE_URL>` and `<ISSUER>`.
+3. Run `curl -isS -X POST <RESOURCE_URL>`; expected status is `401` and header contains
+   `WWW-Authenticate: Bearer resource_metadata=...`, never an HTML login redirect.
 4. Send a valid MCP `initialize` JSON request with `Content-Type: application/json` and Accept
    containing `application/json` plus `text/event-stream`; expect `200` and `Mcp-Session-Id`.
 5. Confirm expired/wrong-audience/missing-scope tokens fail and NetBox sees only server token.
 6. If any step fails, remove agent connector, remove both proxy paths, stop new gateway, and
    restore prior private configuration/image.
+````
