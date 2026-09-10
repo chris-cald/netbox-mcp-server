@@ -27,9 +27,31 @@ Expected results: valid JSON; exact issuer
 endpoints; and `code_challenge_methods_supported` containing `S256`. A `404`, HTML response,
 issuer mismatch, or missing `S256` blocks ChatGPT setup.
 
+## Public MCP route gate
+
+**Current observed state:** Authentik OIDC and RFC 8414 documents now return JSON with
+`["plain","S256"]`; that gate has passed. In contrast,
+`https://netbox.calan.co/mcp` and
+`https://netbox.calan.co/.well-known/oauth-protected-resource/mcp` return NPM/OpenResty `404`.
+No public gateway resource metadata or OAuth challenge is live, so the earlier ChatGPT PKCE
+error cannot be attributed to gateway metadata.
+
+Do not retry ChatGPT. After separate authorization, stage the OIDC-enabled gateway deployment
+first, then add NPM Custom Locations for exactly `/mcp` and
+`/.well-known/oauth-protected-resource/mcp` with no URI rewrite. Verify, in order:
+
+```sh
+curl -iS https://netbox.calan.co/.well-known/oauth-protected-resource/mcp
+curl -iS -X POST https://netbox.calan.co/mcp
+```
+
+Expected results are `200` JSON identifying the protected resource/issuer, then `401` with a
+Bearer `resource_metadata` challenge—not an NPM `404` or login HTML. Only then continue to the
+separate ChatGPT registration gate.
+
 ## Separate ChatGPT gate
 
-Passing this metadata check does **not** establish ChatGPT compatibility. CIMD, DCR, and
+Passing the Authentik metadata and public MCP route checks does **not** establish ChatGPT compatibility. CIMD, DCR, and
 predefined-client support remain unproven. Do not advertise `registration_endpoint` or
 `client_id_metadata_document_supported` unless Authentik actually implements the selected flow.
 Only an end-to-end ChatGPT authorization, callback, token exchange, and MCP `initialize` test

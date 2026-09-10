@@ -197,7 +197,9 @@ describe("production container deployment", () => {
       "Authentik upgrade to `>=2025.8`",
       "/.well-known/oauth-authorization-server/application/o/netbox/",
       "code_challenge_methods_supported",
-      "Passing this metadata check does **not** establish ChatGPT compatibility.",
+      "NPM/OpenResty `404`",
+      "Bearer `resource_metadata` challenge",
+      "Passing the Authentik metadata and public MCP route checks does **not** establish ChatGPT compatibility.",
       "OpenTofu can manage reviewed Authentik image/version desired state",
     ]) {
       expect(oauthMetadataCompatibility).toContain(detail);
