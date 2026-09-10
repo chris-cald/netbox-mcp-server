@@ -381,9 +381,9 @@ Expected result: JSON with exact `issuer` and `jwks_uri` copied into the Prepara
 | Resource URL          | `<RESOURCE_URL>`            | exact public HTTPS `/mcp`     | DNS/TLS design       |
 
 For a client that requires RFC 8414 authorization-server metadata even though Authentik OIDC
-discovery advertises `S256`, use the standards-backed, metadata-only bridge described in
-[OAuth metadata compatibility bridge](oauth-metadata-compatibility.md). Do not deploy it until
-a separate authorization covers the Authentik-host proxy route.
+discovery advertises `S256`, Authentik must be `>=2025.8`; see
+[OAuth metadata compatibility prerequisite](oauth-metadata-compatibility.md). ChatGPT client
+registration remains a separate unproven end-to-end gate.
 
 ### Agent
 

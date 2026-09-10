@@ -190,34 +190,20 @@ describe("production container deployment", () => {
     }
   });
 
-  it("documents an RFC 8414 bridge without treating OpenTofu as a protocol fix", () => {
+  it("requires an Authentik upgrade instead of a metadata bridge", () => {
     expect(operatorSetup).toContain("oauth-metadata-compatibility.md");
-    expect(oauthMetadataCompatibility).toContain("RFC 9728");
-    expect(oauthMetadataCompatibility).toContain("RFC 8414 section 3.1");
-    expect(oauthMetadataCompatibility).toContain(
-      "/.well-known/oauth-authorization-server/application/o/netbox",
-    );
-    expect(oauthMetadataCompatibility).toContain(
-      '"code_challenge_methods_supported": ["S256"]',
-    );
-    expect(oauthMetadataCompatibility).toContain(
-      "OpenTofu is desired-state automation, not a protocol fix.",
-    );
-    expect(oauthMetadataCompatibility).toContain("oauth-metadata-bridge-design.md");
     for (const detail of [
-      "proxy_pass_request_body off;",
-      'proxy_set_header Authorization "";',
-      'proxy_set_header Cookie "";',
+      "Authentik `2025.2.4` predates RFC 8414",
+      "Authentik upgrade to `>=2025.8`",
+      "/.well-known/oauth-authorization-server/application/o/netbox/",
       "code_challenge_methods_supported",
-      "Dynamic Client Registration (DCR)",
-      "Client ID Metadata Documents",
-      "Status: blocked; this bridge is not ChatGPT-ready.",
-      "Do not advertise `registration_endpoint`",
-      "OpenTofu desired state",
-      "curl -iS https://auth.calan.co/.well-known/oauth-authorization-server/application/o/netbox",
+      "Passing this metadata check does **not** establish ChatGPT compatibility.",
+      "OpenTofu can manage reviewed Authentik image/version desired state",
     ]) {
-      expect(oauthMetadataBridgeDesign).toContain(detail);
+      expect(oauthMetadataCompatibility).toContain(detail);
     }
+    expect(oauthMetadataBridgeDesign).toContain("Do not implement this bridge.");
+    expect(oauthMetadataBridgeDesign).toContain("Authentik `>=2025.8`");
   });
 
   it("runs container build and Compose configuration gates in CI", () => {
