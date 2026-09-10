@@ -198,7 +198,7 @@ Set `NETBOX_URL` and exactly one token source. The default transport is stdio; o
 | `NETBOX_INSECURE`            | no       | off     | `1`/`true`/`yes`/`y`/`on` skips TLS certificate verification. Prefer installing your internal root CA.                                                   |
 | `NETBOX_TRANSPORT`           | no       | `stdio` | `stdio` (default) or `http`.                                                                                                                             |
 | `NETBOX_HTTP_ALLOWED_HOSTS`  | HTTP     | —       | Comma-separated published `Host` values; DNS-rebinding protection, not authentication.                                                                   |
-| `NETBOX_OIDC_ISSUER`         | HTTP     | —       | Canonical HTTPS Authentik issuer; listed as the metadata authorization server.                                                                           |
+| `NETBOX_OIDC_ISSUER`         | HTTP     | —       | Canonical HTTPS authorization-server issuer; listed as the metadata authorization server.                                                                |
 | `NETBOX_OIDC_JWKS_URL`       | HTTP     | —       | Canonical HTTPS JWKS URL used to verify gateway Bearer tokens.                                                                                           |
 | `NETBOX_OIDC_AUDIENCE`       | HTTP     | —       | Exact nonempty JWT audience.                                                                                                                             |
 | `NETBOX_OIDC_REQUIRED_SCOPE` | HTTP     | —       | Exact required scope in the JWT `scope` claim.                                                                                                           |
@@ -298,6 +298,10 @@ proxy in a deployment-specific overlay, they must set the matching
 network policy. Host validation is DNS-rebinding protection, not access control. Stdio
 remains the normal deployment.
 The disposable E2E NetBox fixture stays separate in `docker-compose.e2e.yml`.
+
+For field-ordered installation, runtime, proxy, OAuth, and agent-integration
+requirements, read [`docs/operator-setup.md`](docs/operator-setup.md). It labels
+manual and unsupported paths rather than supplying unverified package, pod, or proxy recipes.
 
 ---
 

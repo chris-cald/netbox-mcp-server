@@ -7,6 +7,7 @@ const compose = readFileSync("compose.yaml", "utf8");
 const dockerignore = readFileSync(".dockerignore", "utf8");
 const readme = readFileSync("README.md", "utf8");
 const containerDeployment = readFileSync("docs/container-deployment.md", "utf8");
+const operatorSetup = readFileSync("docs/operator-setup.md", "utf8");
 const ci = readFileSync(".github/workflows/ci.yml", "utf8");
 
 describe("production container deployment", () => {
@@ -71,6 +72,29 @@ describe("production container deployment", () => {
       expect(containerDeployment).toContain(detail);
     }
     expect(containerDeployment).toMatch(/Never place an Authentik client secret, JWT/i);
+  });
+
+  it("links a field-ordered operator guide without inventing unsupported installers", () => {
+    expect(readme).toContain("docs/operator-setup.md");
+    for (const heading of [
+      "## 2. Installation",
+      "### Package managers",
+      "### Container image and Compose: Docker or Podman",
+      "### Pods: Kubernetes or Podman",
+      "### Direct Docker or Podman run",
+      "## 4. Reverse proxy",
+      "## 5. Authorization",
+      "## 6. Agent integrations",
+    ]) {
+      expect(operatorSetup).toContain(heading);
+    }
+    expect(operatorSetup).toContain("Do not invent package-manager commands.");
+    expect(operatorSetup).toContain(
+      "No Kubernetes manifest, Helm chart, Kustomize overlay",
+    );
+    expect(operatorSetup).toMatch(
+      /never needs a NetBox token, OAuth client secret, JWT/i,
+    );
   });
 
   it("runs container build and Compose configuration gates in CI", () => {
